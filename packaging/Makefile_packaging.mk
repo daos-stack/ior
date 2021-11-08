@@ -28,6 +28,11 @@ RPM_BUILD_OPTIONS += $(EXTERNAL_RPM_BUILD_OPTIONS)
 # some defaults the caller can override
 PACKAGING_CHECK_DIR ?= ../packaging
 LOCAL_REPOS ?= true
+ifeq ($(ID_LIKE),debian)
+DAOS_REPO_TYPE ?= LOCAL
+else
+DAOS_REPO_TYPE ?= STABLE
+endif
 TEST_PACKAGES ?= ${NAME}
 
 # unfortunately we cannot always name the repo the same as the project
@@ -286,25 +291,83 @@ debs: $(DEBS)
 ls: $(TARGETS)
 	ls -ld $^
 
+ifneq ($(GIT_COMMIT),)
+# this needs to be formalized into packaging/Makefile_packaging.mk
+BUILD_DEFINES := --define "commit $(GIT_COMMIT)"
+RPM_BUILD_OPTIONS := $(BUILD_DEFINES)
+GIT_DIFF_EXCLUDES := $(PATCH_EXCLUDE_FILES:%=':!%')
+
+# This not really intended to run in CI.  It's meant as a developer
+# convenience to generate the needed patch and add it to the repo to
+# be committed.
+# Should figure out a way to formalize this into
+# packaging/Makefile_packaging.mk
+$(VERSION)..$(GIT_COMMIT).patch:
+	# it really sucks that GitHub's "compare" returns such dirty patches
+	#curl -O 'https://github.com/hpc/$(NAME)/compare/$@'
+	git clone https://github.com/hpc/$(NAME).git
+	set -x; pushd $(NAME) &&                                \
+	trap 'popd && rm -rf $(NAME)' EXIT;             \
+	echo git diff $(VERSION)..$(GIT_COMMIT) --stat --    \
+	    $(GIT_DIFF_EXCLUDES );                      \
+	git diff $(VERSION)..$(GIT_COMMIT) --           \
+	    $(GIT_DIFF_EXCLUDES) > ../$@;               \
+	popd;                                           \
+	trap 'rm -rf $(NAME)' EXIT;                     \
+	git add $@
+patch: $(VERSION)..$(GIT_COMMIT).patch
+else
+patch:
+	echo "GIT_COMMIT is not defined"
+endif
+
 # *_LOCAL_* repos are locally built packages.
 # *_GROUP_* repos are a local mirror of a group of upstream repos.
 # *_GROUP_* repos may not supply a repomd.xml.key.
 ifeq ($(LOCAL_REPOS),true)
-ifneq ($(REPOSITORY_URL),)
-ifneq ($(DAOS_STACK_$(DISTRO_BASE)_LOCAL_REPO),)
-ifeq ($(ID_LIKE),debian)
-# $(DISTRO_BASE)_LOCAL_REPOS is a list separated by | because you cannot pass lists
-# of values with spaces as environment variables
-$(DISTRO_BASE)_LOCAL_REPOS := [trusted=yes]
-endif
-$(DISTRO_BASE)_LOCAL_REPOS := $($(DISTRO_BASE)_LOCAL_REPOS) $(REPOSITORY_URL)$(DAOS_STACK_$(DISTRO_BASE)_LOCAL_REPO)/
-endif
-$(DISTRO_BASE)_LOCAL_REPOS := $($(DISTRO_BASE)_LOCAL_REPOS)|
-ifneq ($(DAOS_STACK_$(DISTRO_BASE)_GROUP_REPO),)
-$(DISTRO_BASE)_LOCAL_REPOS := $($(DISTRO_BASE)_LOCAL_REPOS)$(REPOSITORY_URL)$(DAOS_STACK_$(DISTRO_BASE)_GROUP_REPO)/|
-endif
-endif
-endif
+  ifneq ($(REPOSITORY_URL),)
+    # group repos are not working in Nexus so we hack in the group members directly below
+    #ifneq ($(DAOS_STACK_$(DISTRO_BASE)_DOCKER_$(DAOS_REPO_TYPE)_REPO),)
+    #DISTRO_REPOS = $(DAOS_STACK_$(DISTRO_BASE)_DOCKER_$(DAOS_REPO_TYPE)_REPO)
+    #$(DISTRO_BASE)_LOCAL_REPOS := $($(DISTRO_BASE)_LOCAL_REPOS)|$(REPOSITORY_URL)$(DAOS_STACK_$(DISTRO_BASE)_DOCKER_$(DAOS_REPO_TYPE)_REPO)/
+    #endif
+    ifneq ($(DAOS_STACK_$(DISTRO_BASE)_$(DAOS_REPO_TYPE)_REPO),)
+      ifeq ($(ID_LIKE),debian)
+        # $(DISTRO_BASE)_LOCAL_REPOS is a list separated by | because you cannot pass lists
+        # of values with spaces as environment variables
+        $(DISTRO_BASE)_LOCAL_REPOS := [trusted=yes]
+      else
+        $(DISTRO_BASE)_LOCAL_REPOS := $(REPOSITORY_URL)$(DAOS_STACK_$(DISTRO_BASE)_LOCAL_REPO)
+        DISTRO_REPOS = disabled # any non-empty value here works and is not used beyond testing if the value is empty or not
+      endif # ifeq ($(ID_LIKE),debian)
+      ifeq ($(DISTRO_BASE), EL_8)
+        # hack to use 8.3 non-group repos on EL_8
+        $(DISTRO_BASE)_LOCAL_REPOS := $($(DISTRO_BASE)_LOCAL_REPOS)|$(subst $(ORIG_TARGET_VER),$(DISTRO_VERSION),$(REPOSITORY_URL)repository/centos-8.3-base-x86_64-proxy|$(REPOSITORY_URL)repository/centos-8.3-extras-x86_64-proxy|$(REPOSITORY_URL)repository/epel-el-8-x86_64-proxy)
+      else ifeq ($(DISTRO_BASE), EL_7)
+        # hack to use 7.9 non-group repos on EL_7
+        $(DISTRO_BASE)_LOCAL_REPOS := $($(DISTRO_BASE)_LOCAL_REPOS)|$(subst $(ORIG_TARGET_VER),$(DISTRO_VERSION),$(REPOSITORY_URL)repository/centos-7.9-base-x86_64-proxy|$(REPOSITORY_URL)repository/centos-7.9-extras-x86_64-proxy|$(REPOSITORY_URL)repository/centos-7.9-updates-x86_64-proxy|$(REPOSITORY_URL)repository/epel-el-7-x86_64-proxy)
+      else ifeq ($(DISTRO_BASE), LEAP_15)
+        # hack to use 15 non-group repos on LEAP_15
+        $(DISTRO_BASE)_LOCAL_REPOS := $($(DISTRO_BASE)_LOCAL_REPOS)|$(subst $(ORIG_TARGET_VER),$(DISTRO_VERSION),$(REPOSITORY_URL)repository/opensuse-15.2-oss-x86_64-proxy|$(REPOSITORY_URL)repository/opensuse-15.2-update-oss-x86_64-provo-mirror-proxy|$(REPOSITORY_URL)repository/opensuse-15.2-update-non-oss-x86_64-proxy|$(REPOSITORY_URL)repository/opensuse-15.2-non-oss-x86_64-proxy|$(REPOSITORY_URL)repository/opensuse-15.2-repo-sle-update-proxy|$(REPOSITORY_URL)repository/opensuse-15.2-repo-backports-update-proxy)
+      else
+        # debian
+        $(DISTRO_BASE)_LOCAL_REPOS := $($(DISTRO_BASE)_LOCAL_REPOS) $(REPOSITORY_URL)$(DAOS_STACK_$(DISTRO_BASE)_$(DAOS_REPO_TYPE)_REPO)
+      endif # ifeq ($(DISTRO_BASE), *)
+    endif #ifneq ($(DAOS_STACK_$(DISTRO_BASE)_$(DAOS_REPO_TYPE)_REPO),)
+    ifneq ($(DAOS_STACK_$(DISTRO_BASE)_APPSTREAM_REPO),)
+      $(DISTRO_BASE)_LOCAL_REPOS := $($(DISTRO_BASE)_LOCAL_REPOS)|$(REPOSITORY_URL)$(DAOS_STACK_$(DISTRO_BASE)_APPSTREAM_REPO)
+    endif
+    # group repos are not working in Nexus so we hack in the group members directly above
+    ifneq ($(DAOS_STACK_$(DISTRO_BASE)_POWERTOOLS_REPO),)
+      $(DISTRO_BASE)_LOCAL_REPOS := $($(DISTRO_BASE)_LOCAL_REPOS)|$(REPOSITORY_URL)$(DAOS_STACK_$(DISTRO_BASE)_POWERTOOLS_REPO)
+    endif
+    ifneq ($(ID_LIKE),debian)
+      ifneq ($(DAOS_STACK_INTEL_ONEAPI_REPO),)
+        $(DISTRO_BASE)_LOCAL_REPOS := $($(DISTRO_BASE)_LOCAL_REPOS)|$(REPOSITORY_URL)$(DAOS_STACK_INTEL_ONEAPI_REPO)
+      endif # ifneq ($(DAOS_STACK_INTEL_ONEAPI_REPO),)
+    endif # ifneq ($(ID_LIKE),debian)
+  endif # ifneq ($(REPOSITORY_URL),)
+endif # ifeq ($(LOCAL_REPOS),true)
 ifeq ($(ID_LIKE),debian)
 chrootbuild: $(DEB_TOP)/$(DEB_DSC)
 	$(call distro_map)                                      \
@@ -331,6 +394,7 @@ chrootbuild: $(SRPM) $(CALLING_MAKEFILE)
 	DISTRO_BASE_LOCAL_REPOS="$($(DISTRO_BASE)_LOCAL_REPOS)" \
 	MOCK_OPTIONS="$(MOCK_OPTIONS)"                          \
 	RPM_BUILD_OPTIONS='$(RPM_BUILD_OPTIONS)'                \
+	DISTRO_REPOS='$(DISTRO_REPOS)'                          \
 	TARGET="$<"                                             \
 	packaging/rpm_chrootbuild
 endif
@@ -378,7 +442,7 @@ endif
 test:
 	# Test the rpmbuild by installing the built RPM
 	$(call install_repos,$(REPO_NAME)@$(BRANCH_NAME):$(BUILD_NUMBER))
-	yum -y install $(TEST_PACKAGES)
+	dnf -y install $(TEST_PACKAGES)
 
 show_spec:
 	@echo '$(SPEC)'
