@@ -1109,10 +1109,10 @@ index 8fa1578..0000000
 -	return size;
 -}
 diff --git a/src/aiori-DFS.c b/src/aiori-DFS.c
-index e7b1d6b..8e6b2a7 100755
+index e7b1d6b..e78f328 100755
 --- a/src/aiori-DFS.c
 +++ b/src/aiori-DFS.c
-@@ -27,20 +27,20 @@
+@@ -27,22 +27,30 @@
  #include <fcntl.h>
  #include <libgen.h>
  
@@ -1127,30 +1127,41 @@ index e7b1d6b..8e6b2a7 100755
  #include "aiori.h"
  #include "utilities.h"
 +#include "iordef.h"
++
++#if defined(DAOS_API_VERSION_MAJOR) && defined(DAOS_API_VERSION_MINOR)
++#define CHECK_DAOS_API_VERSION(major, minor)                            \
++        ((DAOS_API_VERSION_MAJOR > (major))                             \
++         || (DAOS_API_VERSION_MAJOR == (major) && DAOS_API_VERSION_MINOR >= (minor)))
++#else
++#define CHECK_DAOS_API_VERSION(major, minor) 0
++#endif
  
- dfs_t *dfs;
+-dfs_t *dfs;
++static dfs_t *dfs;
  static daos_handle_t poh, coh;
 -static daos_oclass_id_t objectClass = OC_SX;
 -static daos_oclass_id_t dir_oclass = OC_SX;
+-static struct d_hash_table *dir_hash;
+-static bool dfs_init;
 +static daos_oclass_id_t objectClass;
 +static daos_oclass_id_t dir_oclass;
- static struct d_hash_table *dir_hash;
- static bool dfs_init;
++static struct d_hash_table *aiori_dfs_hash = NULL;
++static int dfs_init_count;
  
-@@ -57,9 +57,11 @@ enum handleType {
+ struct aiori_dir_hdl {
+         d_list_t	entry;
+@@ -57,9 +65,8 @@ enum handleType {
  };
  
  /************************** O P T I O N S *****************************/
 -struct dfs_options{
 +typedef struct {
          char	*pool;
-+#if !defined(DAOS_API_VERSION_MAJOR) || DAOS_API_VERSION_MAJOR < 1
-         char	*svcl;
-+#endif
+-        char	*svcl;
          char	*group;
          char	*cont;
  	int	chunk_size;
-@@ -67,57 +69,71 @@ struct dfs_options{
+@@ -67,57 +74,67 @@ struct dfs_options{
  	char	*dir_oclass;
  	char	*prefix;
          int	destroy;
@@ -1188,25 +1199,20 @@ index e7b1d6b..8e6b2a7 100755
 +                memcpy(o, init_values, sizeof(DFS_options_t));
 +        } else {
 +                memset(o, 0, sizeof(DFS_options_t));
-+                /* initialize the options properly */
-+                o->chunk_size	= 1048576;
 +        }
 +
 +        *init_backend_options = (aiori_mod_opt_t *) o;
 +
 +        option_help h [] = {
-+                {0, "dfs.pool", "pool uuid", OPTION_OPTIONAL_ARGUMENT, 's', &o->pool},
-+#if !defined(DAOS_API_VERSION_MAJOR) || DAOS_API_VERSION_MAJOR < 1
-+                {0, "dfs.svcl", "pool SVCL", OPTION_OPTIONAL_ARGUMENT, 's', &o->svcl},
-+#endif
-+                {0, "dfs.group", "server group", OPTION_OPTIONAL_ARGUMENT, 's', &o->group},
-+                {0, "dfs.cont", "DFS container uuid", OPTION_OPTIONAL_ARGUMENT, 's', &o->cont},
-+                {0, "dfs.chunk_size", "chunk size", OPTION_OPTIONAL_ARGUMENT, 'd', &o->chunk_size},
-+                {0, "dfs.oclass", "object class", OPTION_OPTIONAL_ARGUMENT, 's', &o->oclass},
-+                {0, "dfs.dir_oclass", "directory object class", OPTION_OPTIONAL_ARGUMENT, 's',
++                {0, "dfs.pool", "Pool label or uuid", OPTION_OPTIONAL_ARGUMENT, 's', &o->pool},
++                {0, "dfs.group", "DAOS system name", OPTION_OPTIONAL_ARGUMENT, 's', &o->group},
++                {0, "dfs.cont", "Container label or uuid", OPTION_OPTIONAL_ARGUMENT, 's', &o->cont},
++                {0, "dfs.chunk_size", "File chunk size in bytes (e.g.: 8, 4k, 2m, 1g)", OPTION_OPTIONAL_ARGUMENT, 'd', &o->chunk_size},
++                {0, "dfs.oclass", "File object class", OPTION_OPTIONAL_ARGUMENT, 's', &o->oclass},
++                {0, "dfs.dir_oclass", "Directory object class", OPTION_OPTIONAL_ARGUMENT, 's',
 +                 &o->dir_oclass},
-+                {0, "dfs.prefix", "mount prefix", OPTION_OPTIONAL_ARGUMENT, 's', &o->prefix},
-+                {0, "dfs.destroy", "Destroy DFS Container", OPTION_FLAG, 'd', &o->destroy},
++                {0, "dfs.prefix", "Mount prefix", OPTION_OPTIONAL_ARGUMENT, 's', &o->prefix},
++                {0, "dfs.destroy", "Destroy DFS container on finalize", OPTION_FLAG, 'd', &o->destroy},
 +                LAST_OPTION
 +        };
 +
@@ -1247,6 +1253,7 @@ index e7b1d6b..8e6b2a7 100755
 +static int DFS_Statfs (const char *, ior_aiori_statfs_t *, aiori_mod_opt_t *);
 +static int DFS_Stat (const char *, struct stat *, aiori_mod_opt_t *);
 +static int DFS_Mkdir (const char *, mode_t, aiori_mod_opt_t *);
++static int DFS_Rename(const char *, const char *, aiori_mod_opt_t *);
 +static int DFS_Rmdir (const char *, aiori_mod_opt_t *);
 +static int DFS_Access (const char *, int, aiori_mod_opt_t *);
  static option_help * DFS_options();
@@ -1262,13 +1269,14 @@ index e7b1d6b..8e6b2a7 100755
          .create		= DFS_Create,
          .open		= DFS_Open,
          .xfer		= DFS_Xfer,
-@@ -127,14 +143,14 @@ ior_aiori_t dfs_aiori = {
+@@ -127,14 +144,15 @@ ior_aiori_t dfs_aiori = {
          .fsync		= DFS_Fsync,
          .sync		= DFS_Sync,
          .get_file_size	= DFS_GetFileSize,
 +        .xfer_hints	= DFS_init_xfer_options,
          .statfs		= DFS_Statfs,
          .mkdir		= DFS_Mkdir,
++        .rename		= DFS_Rename,
          .rmdir		= DFS_Rmdir,
          .access		= DFS_Access,
          .stat		= DFS_Stat,
@@ -1279,8 +1287,33 @@ index e7b1d6b..8e6b2a7 100755
          .enable_mdtest	= true,
  };
  
-@@ -166,6 +182,26 @@ do {                                                                    \
-         MPI_CHECK(MPI_Abort(MPI_COMM_WORLD, -1), "MPI_Abort() error");  \
+@@ -145,12 +163,12 @@ ior_aiori_t dfs_aiori = {
+ do {                                                                    \
+         int _rc = (rc);                                                 \
+                                                                         \
+-        if (_rc != 0) {                                                  \
++        if (_rc != 0) {                                                 \
+                 fprintf(stderr, "ERROR (%s:%d): %d: %d: "               \
+                         format"\n", __FILE__, __LINE__, rank, _rc,      \
+                         ##__VA_ARGS__);                                 \
+                 fflush(stderr);                                         \
+-                exit(-1);                                       	\
++                goto out;                                               \
+         }                                                               \
+ } while (0)
+ 
+@@ -160,12 +178,33 @@ do {                                                                    \
+                 printf("[%d] "format"\n", rank, ##__VA_ARGS__);         \
+ } while (0)
+ 
+-#define GERR(format, ...)                                               \
++#define DERR(format, ...)                                               \
+ do {                                                                    \
+         fprintf(stderr, format"\n", ##__VA_ARGS__);                     \
+-        MPI_CHECK(MPI_Abort(MPI_COMM_WORLD, -1), "MPI_Abort() error");  \
++        fflush(stderr);                                                 \
++        rc = -1;                                                        \
++        goto out;                                                       \
  } while (0)
  
 +static aiori_xfer_hint_t * hints = NULL;
@@ -1296,17 +1329,53 @@ index e7b1d6b..8e6b2a7 100755
 +        if (o->pool == NULL || o->cont == NULL)
 +                ERR("Invalid pool or container options\n");
 +
-+#if !defined(DAOS_API_VERSION_MAJOR) || DAOS_API_VERSION_MAJOR < 1
-+        if (o->svcl == NULL)
-+                ERR("Invalid SVCL\n");
-+#endif
++        if (testComm == MPI_COMM_NULL)
++                testComm = MPI_COMM_WORLD;
++
 +        return 0;
 +}
 +
  static inline struct aiori_dir_hdl *
  hdl_obj(d_list_t *rlink)
  {
-@@ -219,8 +255,7 @@ HandleDistribute(enum handleType type)
+@@ -186,18 +225,33 @@ rec_free(struct d_hash_table *htable, d_list_t *rlink)
+ {
+         struct aiori_dir_hdl *hdl = hdl_obj(rlink);
+ 
+-        assert(d_hash_rec_unlinked(&hdl->entry));
+         dfs_release(hdl->oh);
+         free(hdl);
+ }
+ 
++static bool
++rec_decref(struct d_hash_table *htable, d_list_t *rlink)
++{
++        return true;
++}
++
++static uint32_t
++rec_hash(struct d_hash_table *htable, d_list_t *rlink)
++{
++	struct aiori_dir_hdl *hdl = hdl_obj(rlink);
++
++        return d_hash_string_u32(hdl->name, strlen(hdl->name));
++}
++
+ static d_hash_table_ops_t hdl_hash_ops = {
+         .hop_key_cmp	= key_cmp,
+-        .hop_rec_free	= rec_free
++	.hop_rec_decref	= rec_decref,
++	.hop_rec_free	= rec_free,
++	.hop_rec_hash	= rec_hash
+ };
+ 
+ /* Distribute process 0's pool or container handle to others. */
+-static void
++static int
+ HandleDistribute(enum handleType type)
+ {
+         d_iov_t global;
+@@ -219,8 +273,7 @@ HandleDistribute(enum handleType type)
                  DCHECK(rc, "Failed to get global handle size");
          }
  
@@ -1316,7 +1385,7 @@ index e7b1d6b..8e6b2a7 100755
                    "Failed to bcast global handle buffer size");
  
  	global.iov_len = global.iov_buf_len;
-@@ -238,8 +273,7 @@ HandleDistribute(enum handleType type)
+@@ -238,8 +291,7 @@ HandleDistribute(enum handleType type)
                  DCHECK(rc, "Failed to create global handle");
          }
  
@@ -1326,11 +1395,113 @@ index e7b1d6b..8e6b2a7 100755
                    "Failed to bcast global pool handle");
  
          if (rank != 0) {
-@@ -346,6 +380,45 @@ out:
+@@ -252,7 +304,10 @@ HandleDistribute(enum handleType type)
+                 DCHECK(rc, "Failed to get local handle");
+         }
+ 
+-        free(global.iov_buf);
++out:
++        if (global.iov_buf)
++                free(global.iov_buf);
++        return rc;
+ }
+ 
+ static int
+@@ -267,14 +322,6 @@ parse_filename(const char *path, char **_obj_name, char **_cont_name)
+ 	if (path == NULL || _obj_name == NULL || _cont_name == NULL)
+ 		return -EINVAL;
+ 
+-	if (strcmp(path, "/") == 0) {
+-		*_cont_name = strdup("/");
+-		if (*_cont_name == NULL)
+-			return -ENOMEM;
+-		*_obj_name = NULL;
+-		return 0;
+-	}
+-
+ 	f1 = strdup(path);
+ 	if (f1 == NULL) {
+                 rc = -ENOMEM;
+@@ -290,53 +337,35 @@ parse_filename(const char *path, char **_obj_name, char **_cont_name)
+ 	fname = basename(f1);
+ 	cont_name = dirname(f2);
+ 
+-	if (cont_name[0] == '.' || cont_name[0] != '/') {
+-		char cwd[1024];
++        if (cont_name[0] != '/') {
++                char *ptr;
++                char buf[PATH_MAX];
+ 
+-		if (getcwd(cwd, 1024) == NULL) {
+-                        rc = -ENOMEM;
++                ptr = realpath(cont_name, buf);
++                if (ptr == NULL) {
++                        rc = errno;
+                         goto out;
+                 }
+ 
+-		if (strcmp(cont_name, ".") == 0) {
+-			cont_name = strdup(cwd);
+-			if (cont_name == NULL) {
+-                                rc = -ENOMEM;
+-                                goto out;
+-                        }
+-		} else {
+-			char *new_dir = calloc(strlen(cwd) + strlen(cont_name)
+-					       + 1, sizeof(char));
+-			if (new_dir == NULL) {
+-                                rc = -ENOMEM;
+-                                goto out;
+-                        }
+-
+-			strcpy(new_dir, cwd);
+-			if (cont_name[0] == '.') {
+-				strcat(new_dir, &cont_name[1]);
+-			} else {
+-				strcat(new_dir, "/");
+-				strcat(new_dir, cont_name);
+-			}
+-			cont_name = new_dir;
+-		}
+-		*_cont_name = cont_name;
+-	} else {
+-		*_cont_name = strdup(cont_name);
+-		if (*_cont_name == NULL) {
+-                        rc = -ENOMEM;
++                cont_name = strdup(ptr);
++                if (cont_name == NULL) {
++                        rc = ENOMEM;
+                         goto out;
+                 }
+-	}
++                *_cont_name = cont_name;
++        } else {
++                *_cont_name = strdup(cont_name);
++                if (*_cont_name == NULL) {
++                        rc = ENOMEM;
++                        goto out;
++                }
++        }
+ 
+-	*_obj_name = strdup(fname);
+-	if (*_obj_name == NULL) {
+-		free(*_cont_name);
+-		*_cont_name = NULL;
+-                rc = -ENOMEM;
++        *_obj_name = strdup(fname);
++        if (*_obj_name == NULL) {
++                rc = ENOMEM;
+                 goto out;
+-	}
++        }
+ 
+ out:
+ 	if (f1)
+@@ -346,285 +375,400 @@ out:
  	return rc;
  }
  
-+static void
++static int
 +share_file_handle(dfs_obj_t **file, MPI_Comm comm)
 +{
 +        d_iov_t global;
@@ -1366,13 +1537,61 @@ index e7b1d6b..8e6b2a7 100755
 +                DCHECK(rc, "Failed to get local handle");
 +        }
 +
-+        free(global.iov_buf);
++out:
++        if (global.iov_buf)
++                free(global.iov_buf);
++        return rc;
 +}
 +
  static dfs_obj_t *
  lookup_insert_dir(const char *name, mode_t *mode)
  {
-@@ -379,12 +452,10 @@ lookup_insert_dir(const char *name, mode_t *mode)
+         struct aiori_dir_hdl *hdl;
++        dfs_obj_t *oh;
+         d_list_t *rlink;
++        size_t len = strlen(name);
+         int rc;
+ 
+-        rlink = d_hash_rec_find(dir_hash, name, strlen(name));
++        rlink = d_hash_rec_find(aiori_dfs_hash, name, len);
+         if (rlink != NULL) {
+                 hdl = hdl_obj(rlink);
+                 return hdl->oh;
+         }
+ 
++        rc = dfs_lookup(dfs, name, O_RDWR, &oh, mode, NULL);
++        if (rc)
++                return NULL;
++
++        if (mode && !S_ISDIR(*mode))
++                return oh;
++
+         hdl = calloc(1, sizeof(struct aiori_dir_hdl));
+         if (hdl == NULL)
+-                GERR("failed to alloc dir handle");
++                return NULL;
+ 
+-        strncpy(hdl->name, name, PATH_MAX-1);
+-        hdl->name[PATH_MAX-1] = '\0';
++        strncpy(hdl->name, name, len);
++        hdl->oh = oh;
+ 
+-        rc = dfs_lookup(dfs, name, O_RDWR, &hdl->oh, mode, NULL);
+-        if (rc)
++        rc = d_hash_rec_insert(aiori_dfs_hash, hdl->name, len, &hdl->entry, false);
++        if (rc) {
++                fprintf(stderr, "Failed to insert dir handle in hashtable\n");
++                dfs_release(hdl->oh);
++                free(hdl);
+                 return NULL;
+-        if (mode && S_ISREG(*mode))
+-                return hdl->oh;
+-
+-        rc = d_hash_rec_insert(dir_hash, hdl->name, strlen(hdl->name),
+-                               &hdl->entry, true);
+-        DCHECK(rc, "Failed to insert dir handle in hashtable");
++        }
+ 
          return hdl->oh;
  }
  
@@ -1385,92 +1604,144 @@ index e7b1d6b..8e6b2a7 100755
 +DFS_Init(aiori_mod_opt_t * options)
 +{
 +        DFS_options_t *o = (DFS_options_t *)options;
++        bool pool_connect, cont_create, cont_open, dfs_mounted;
++        uuid_t co_uuid;
  	int rc;
  
-         /** in case we are already initialized, return */
-@@ -392,22 +463,27 @@ DFS_Init() {
+-        /** in case we are already initialized, return */
+-        if (dfs_init)
++        dfs_init_count++;
++        if (dfs_init_count > 1) {
++                pool_connect = cont_create = cont_open = dfs_mounted = true;
++                /** chunk size and oclass can change between different runs */
++                if (o->oclass) {
++                        objectClass = daos_oclass_name2id(o->oclass);
++                        if (objectClass == OC_UNKNOWN)
++                                DERR("Invalid DAOS object class: %s\n", o->oclass);
++                }
++                if (o->dir_oclass) {
++                        dir_oclass = daos_oclass_name2id(o->dir_oclass);
++                        if (dir_oclass == OC_UNKNOWN)
++                                DERR("Invalid DAOS directory object class: %s\n", o->dir_oclass);
++                }
                  return;
++        }
  
          /** shouldn't be fatal since it can be called with POSIX backend selection */
 -        if (o.pool == NULL || o.svcl == NULL || o.cont == NULL)
-+        if (o->pool == NULL || o->cont == NULL)
-+                return;
-+
-+#if !defined(DAOS_API_VERSION_MAJOR) || DAOS_API_VERSION_MAJOR < 1
-+        if (o->svcl == NULL)
++        if (o->pool == NULL || o->cont == NULL) {
++                dfs_init_count--;
                  return;
-+#endif
++        }
++
++        pool_connect = cont_create = cont_open = dfs_mounted = false;
  
  	rc = daos_init();
          DCHECK(rc, "Failed to initialize daos");
  
 -        if (o.oclass) {
 -                objectClass = daos_oclass_name2id(o.oclass);
+-		if (objectClass == OC_UNKNOWN)
+-			GERR("Invalid DAOS object class %s\n", o.oclass);
+-	}
 +        if (o->oclass) {
 +                objectClass = daos_oclass_name2id(o->oclass);
- 		if (objectClass == OC_UNKNOWN)
--			GERR("Invalid DAOS object class %s\n", o.oclass);
-+			GERR("Invalid DAOS object class %s\n", o->oclass);
- 	}
++                if (objectClass == OC_UNKNOWN)
++                        DERR("Invalid DAOS object class: %s\n", o->oclass);
++        }
  
 -        if (o.dir_oclass) {
 -                dir_oclass = daos_oclass_name2id(o.dir_oclass);
+-		if (dir_oclass == OC_UNKNOWN)
+-			GERR("Invalid DAOS directory object class %s\n", o.dir_oclass);
+-	}
 +        if (o->dir_oclass) {
 +                dir_oclass = daos_oclass_name2id(o->dir_oclass);
- 		if (dir_oclass == OC_UNKNOWN)
--			GERR("Invalid DAOS directory object class %s\n", o.dir_oclass);
-+			GERR("Invalid DAOS directory object class %s\n", o->dir_oclass);
- 	}
++                if (dir_oclass == OC_UNKNOWN)
++                        DERR("Invalid DAOS directory object class: %s\n", o->dir_oclass);
++        }
  
-         rc = d_hash_table_create(0, 16, NULL, &hdl_hash_ops, &dir_hash);
-@@ -415,27 +491,34 @@ DFS_Init() {
+-        rc = d_hash_table_create(0, 16, NULL, &hdl_hash_ops, &dir_hash);
++        rc = d_hash_table_create(D_HASH_FT_EPHEMERAL | D_HASH_FT_NOLOCK | D_HASH_FT_LRU,
++                                 4, NULL, &hdl_hash_ops, &aiori_dfs_hash);
+         DCHECK(rc, "Failed to initialize dir hashtable");
  
          if (rank == 0) {
-                 uuid_t pool_uuid, co_uuid;
+-                uuid_t pool_uuid, co_uuid;
 -                d_rank_list_t *svcl = NULL;
                  daos_pool_info_t pool_info;
                  daos_cont_info_t co_info;
  
 -                rc = uuid_parse(o.pool, pool_uuid);
 -                DCHECK(rc, "Failed to parse 'Pool uuid': %s", o.pool);
-+                rc = uuid_parse(o->pool, pool_uuid);
-+                DCHECK(rc, "Failed to parse 'Pool uuid': %s", o->pool);
++                INFO(VERBOSE_1, "DFS Pool = %s", o->pool);
++                INFO(VERBOSE_1, "DFS Container = %s", o->cont);
  
 -                rc = uuid_parse(o.cont, co_uuid);
 -                DCHECK(rc, "Failed to parse 'Cont uuid': %s", o.cont);
++#if CHECK_DAOS_API_VERSION(1, 4)
++                rc = daos_pool_connect(o->pool, o->group, DAOS_PC_RW, &poh, &pool_info, NULL);
++                DCHECK(rc, "Failed to connect to pool %s", o->pool);
++                pool_connect = true;
+ 
+-                svcl = daos_rank_list_parse(o.svcl, ":");
+-                if (svcl == NULL)
+-                        ERR("Failed to allocate svcl");
++                rc = daos_cont_open(poh, o->cont, DAOS_COO_RW, &coh, &co_info, NULL);
++#else
++                uuid_t pool_uuid;
+ 
+-                INFO(VERBOSE_1, "Pool uuid = %s, SVCL = %s\n", o.pool, o.svcl);
+-                INFO(VERBOSE_1, "DFS Container namespace uuid = %s\n", o.cont);
++                rc = uuid_parse(o->pool, pool_uuid);
++                DCHECK(rc, "Failed to parse 'Pool uuid': %s", o->pool);
 +                rc = uuid_parse(o->cont, co_uuid);
 +                DCHECK(rc, "Failed to parse 'Cont uuid': %s", o->cont);
  
--                svcl = daos_rank_list_parse(o.svcl, ":");
-+                INFO(VERBOSE_1, "Pool uuid = %s", o->pool);
-+                INFO(VERBOSE_1, "DFS Container namespace uuid = %s", o->cont);
-+
-+#if !defined(DAOS_API_VERSION_MAJOR) || DAOS_API_VERSION_MAJOR < 1
-+                d_rank_list_t *svcl = NULL;
-+
-+                svcl = daos_rank_list_parse(o->svcl, ":");
-                 if (svcl == NULL)
-                         ERR("Failed to allocate svcl");
--
--                INFO(VERBOSE_1, "Pool uuid = %s, SVCL = %s\n", o.pool, o.svcl);
--                INFO(VERBOSE_1, "DFS Container namespace uuid = %s\n", o.cont);
-+                INFO(VERBOSE_1, "Pool svcl = %s", o->svcl);
- 
-                 /** Connect to DAOS pool */
+-                /** Connect to DAOS pool */
 -                rc = daos_pool_connect(pool_uuid, o.group, svcl, DAOS_PC_RW,
-+                rc = daos_pool_connect(pool_uuid, o->group, svcl, DAOS_PC_RW,
-                                        &poh, &pool_info, NULL);
-                 d_rank_list_free(svcl);
-+#else
-+                rc = daos_pool_connect(pool_uuid, o->group, DAOS_PC_RW,
-+                                       &poh, &pool_info, NULL);
-+#endif
-                 DCHECK(rc, "Failed to connect to pool");
+-                                       &poh, &pool_info, NULL);
+-                d_rank_list_free(svcl);
+-                DCHECK(rc, "Failed to connect to pool");
++                rc = daos_pool_connect(pool_uuid, o->group, DAOS_PC_RW, &poh, &pool_info, NULL);
++                DCHECK(rc, "Failed to connect to pool %s", o->pool);
++                pool_connect = true;
  
-                 rc = daos_cont_open(poh, co_uuid, DAOS_COO_RW, &coh, &co_info,
-@@ -459,36 +542,37 @@ DFS_Init() {
+-                rc = daos_cont_open(poh, co_uuid, DAOS_COO_RW, &coh, &co_info,
+-                                    NULL);
++                rc = daos_cont_open(poh, co_uuid, DAOS_COO_RW, &coh, &co_info, NULL);
++#endif
+                 /* If NOEXIST we create it */
+                 if (rc == -DER_NONEXIST) {
+                         INFO(VERBOSE_1, "Creating DFS Container ...\n");
+-
++#if CHECK_DAOS_API_VERSION(1, 4)
++                        if (uuid_parse(o->cont, co_uuid) != 0)
++                                /** user passes in label */
++                                rc = dfs_cont_create_with_label(poh, o->cont, NULL, &co_uuid, &coh, NULL);
++                        else
++                                /** user passes in uuid */
++#endif
+                         rc = dfs_cont_create(poh, co_uuid, NULL, &coh, NULL);
+                         if (rc)
+                                 DCHECK(rc, "Failed to create container");
++                        cont_create = true;
+                 } else if (rc) {
+                         DCHECK(rc, "Failed to create container");
+                 }
++                cont_open = true;
+ 
+                 rc = dfs_mount(poh, coh, O_RDWR, &dfs);
+                 DCHECK(rc, "Failed to mount DFS namespace");
++                dfs_mounted = true;
+         }
+ 
+         HandleDistribute(POOL_HANDLE);
++        pool_connect = true;
          HandleDistribute(CONT_HANDLE);
++        cont_open = true;
          HandleDistribute(DFS_HANDLE);
++        dfs_mounted = true;
  
 -        if (o.prefix) {
 -                rc = dfs_set_prefix(dfs, o.prefix);
@@ -1478,7 +1749,29 @@ index e7b1d6b..8e6b2a7 100755
 +                rc = dfs_set_prefix(dfs, o->prefix);
                  DCHECK(rc, "Failed to set DFS Prefix");
          }
-         dfs_init = true;
+-        dfs_init = true;
++
++out:
++        if (rc) {
++                if (dfs_mounted)
++                        dfs_umount(dfs);
++                if (cont_open)
++                        daos_cont_close(coh, NULL);
++                if (cont_create && rank == 0) {
++#if CHECK_DAOS_API_VERSION(1, 4)
++                        daos_cont_destroy(poh, o->cont, 1, NULL);
++#else
++                        daos_cont_destroy(poh, co_uuid, 1, NULL);
++#endif
++                }
++                if (pool_connect)
++                        daos_pool_disconnect(poh, NULL);
++                if (aiori_dfs_hash)
++                        d_hash_table_destroy(aiori_dfs_hash, false);
++                daos_fini();
++                dfs_init_count--;
++                ERR("Failed to initialize DAOS DFS driver");
++        }
  }
  
  static void
@@ -1489,8 +1782,28 @@ index e7b1d6b..8e6b2a7 100755
          int rc;
  
 -	MPI_Barrier(MPI_COMM_WORLD);
+-        d_hash_table_destroy(dir_hash, true /* force */);
++	objectClass	= 0;
++	dir_oclass	= 0;
++
++        dfs_init_count --;
++        if (dfs_init_count != 0)
++                return;
++
 +	MPI_Barrier(testComm);
-         d_hash_table_destroy(dir_hash, true /* force */);
++
++        while (1) {
++                d_list_t *rlink = NULL;
++
++                rlink = d_hash_rec_first(aiori_dfs_hash);
++                if (rlink == NULL)
++                        break;
++                d_hash_rec_decref(aiori_dfs_hash, rlink);
++        }
++
++        rc = d_hash_table_destroy(aiori_dfs_hash, false);
++        DCHECK(rc, "Failed to destroy DFS hash");
++        MPI_Barrier(testComm);
  
  	rc = dfs_umount(dfs);
          DCHECK(rc, "Failed to umount DFS namespace");
@@ -1507,17 +1820,18 @@ index e7b1d6b..8e6b2a7 100755
 +	if (o->destroy) {
                  if (rank == 0) {
                          uuid_t uuid;
-                         double t1, t2;
+-                        double t1, t2;
  
 -                        INFO(VERBOSE_1, "Destorying DFS Container: %s\n", o.cont);
 -                        uuid_parse(o.cont, uuid);
-+                        INFO(VERBOSE_1, "Destroying DFS Container: %s\n", o->cont);
+-                        t1 = MPI_Wtime();
++                        INFO(VERBOSE_1, "Destroying DFS Container: %s", o->cont);
 +                        uuid_parse(o->cont, uuid);
-                         t1 = MPI_Wtime();
                          rc = daos_cont_destroy(poh, uuid, 1, NULL);
-                         t2 = MPI_Wtime();
-@@ -496,10 +580,10 @@ DFS_Finalize()
-                                 INFO(VERBOSE_1, "Container Destroy time = %f secs", t2-t1);
+-                        t2 = MPI_Wtime();
+-                        if (rc == 0)
+-                                INFO(VERBOSE_1, "Container Destroy time = %f secs", t2-t1);
++                        DCHECK(rc, "Failed to destroy container %s", o->cont);
                  }
  
 -                MPI_Bcast(&rc, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -1525,11 +1839,15 @@ index e7b1d6b..8e6b2a7 100755
                  if (rc) {
  			if (rank == 0)
 -				DCHECK(rc, "Failed to destroy container %s (%d)", o.cont, rc);
+-			MPI_Abort(MPI_COMM_WORLD, -1);
 +				DCHECK(rc, "Failed to destroy container %s (%d)", o->cont, rc);
- 			MPI_Abort(MPI_COMM_WORLD, -1);
                  }
          }
-@@ -510,7 +594,7 @@ DFS_Finalize()
+ 
+         if (rank == 0)
+-                INFO(VERBOSE_1, "Disconnecting from DAOS POOL\n");
++                INFO(VERBOSE_1, "Disconnecting from DAOS POOL");
+ 
          rc = daos_pool_disconnect(poh, NULL);
          DCHECK(rc, "Failed to disconnect from pool");
  
@@ -1537,10 +1855,13 @@ index e7b1d6b..8e6b2a7 100755
 +	MPI_CHECK(MPI_Barrier(testComm), "barrier error");
  
          if (rank == 0)
-                 INFO(VERBOSE_1, "Finalizing DAOS..\n");
-@@ -519,59 +603,55 @@ DFS_Finalize()
+-                INFO(VERBOSE_1, "Finalizing DAOS..\n");
++                INFO(VERBOSE_1, "Finalizing DAOS..");
+ 
+ 	rc = daos_fini();
          DCHECK(rc, "Failed to finalize DAOS");
  
++out:
          /** reset tunables */
 -	o.pool		= NULL;
 -	o.svcl		= NULL;
@@ -1553,20 +1874,15 @@ index e7b1d6b..8e6b2a7 100755
 -	o.destroy	= 0;
 -	objectClass	= OC_SX;
 -	dir_oclass	= OC_SX;
+-	dfs_init	= false;
 +	o->pool		= NULL;
-+#if !defined(DAOS_API_VERSION_MAJOR) || DAOS_API_VERSION_MAJOR < 1
-+	o->svcl		= NULL;
-+#endif
 +	o->group	= NULL;
 +	o->cont		= NULL;
-+	o->chunk_size	= 1048576;
++	o->chunk_size	= 0;
 +	o->oclass	= NULL;
 +	o->dir_oclass	= NULL;
 +	o->prefix	= NULL;
 +	o->destroy	= 0;
-+	objectClass	= 0;
-+	dir_oclass	= 0;
- 	dfs_init	= false;
  }
  
  /*
@@ -1605,7 +1921,7 @@ index e7b1d6b..8e6b2a7 100755
  
 +                parent = lookup_insert_dir(dir_name, NULL);
 +                if (parent == NULL)
-+                        GERR("Failed to lookup parent dir");
++                        DERR("Failed to lookup parent: %s", dir_name);
 +
                  rc = dfs_open(dfs, parent, name, mode, fd_oflag,
 -                              objectClass, o.chunk_size, NULL, &obj);
@@ -1622,14 +1938,16 @@ index e7b1d6b..8e6b2a7 100755
 -                }
 +
 +        if (!hints->filePerProc) {
-+                share_file_handle(&obj, testComm);
++                rc = share_file_handle(&obj, testComm);
++                DCHECK(rc, "global open of %s Failed", name);
          }
  
++out:
  	if (name)
-@@ -579,52 +659,58 @@ DFS_Create(char *testFileName, IOR_param_t *param)
+ 		free(name);
  	if (dir_name)
  		free(dir_name);
- 
+-
 -        return ((void *)obj);
 +        return (aiori_fd_t *)(obj);
  }
@@ -1667,20 +1985,22 @@ index e7b1d6b..8e6b2a7 100755
 +	if (hints->filePerProc || rank == 0) {
 +                parent = lookup_insert_dir(dir_name, NULL);
 +                if (parent == NULL)
-+                        GERR("Failed to lookup parent dir");
- 
--	rc = dfs_open(dfs, parent, name, mode, fd_oflag, objectClass,
--                      o.chunk_size, NULL, &obj);
--        DCHECK(rc, "dfs_open() of %s Failed", name);
++                        DERR("Failed to lookup parent: %s", dir_name);
++
 +                rc = dfs_open(dfs, parent, name, mode, fd_oflag, objectClass,
 +                              o->chunk_size, NULL, &obj);
 +                DCHECK(rc, "dfs_open() of %s Failed", name);
 +        }
-+
+ 
+-	rc = dfs_open(dfs, parent, name, mode, fd_oflag, objectClass,
+-                      o.chunk_size, NULL, &obj);
+-        DCHECK(rc, "dfs_open() of %s Failed", name);
 +        if (!hints->filePerProc) {
-+                share_file_handle(&obj, testComm);
++                rc = share_file_handle(&obj, testComm);
++                DCHECK(rc, "global open of %s Failed", name);
 +        }
  
++out:
  	if (name)
  		free(name);
  	if (dir_name)
@@ -1701,24 +2021,31 @@ index e7b1d6b..8e6b2a7 100755
  {
          int xferRetries = 0;
          long long remaining = (long long)length;
-@@ -647,20 +733,20 @@ DFS_Xfer(int access, void *file, IOR_size_t *buffer, IOR_offset_t length,
+@@ -647,20 +791,23 @@ DFS_Xfer(int access, void *file, IOR_size_t *buffer, IOR_offset_t length,
  
                  /* write/read file */
                  if (access == WRITE) {
 -                        rc = dfs_write(dfs, obj, &sgl, param->offset, NULL);
-+                        rc = dfs_write(dfs, obj, &sgl, off, NULL);
-                         if (rc) {
+-                        if (rc) {
 -                                fprintf(stderr, "dfs_write() failed (%d)", rc);
-+                                fprintf(stderr, "dfs_write() failed (%d)\n", rc);
-                                 return -1;
-                         }
+-                                return -1;
+-                        }
++                        rc = dfs_write(dfs, obj, &sgl, off, NULL);
++                        if (rc)
++                                ERRF("dfs_write(%p, %lld) failed (%d): %s\n",
++                                     (void*)ptr, remaining, rc, strerror(rc));
                          ret = remaining;
                  } else {
 -                        rc = dfs_read(dfs, obj, &sgl, param->offset, &ret, NULL);
-+                        rc = dfs_read(dfs, obj, &sgl, off, &ret, NULL);
-                         if (rc || ret == 0)
+-                        if (rc || ret == 0)
 -                                fprintf(stderr, "dfs_read() failed(%d)", rc);
-+                                fprintf(stderr, "dfs_read() failed(%d)\n", rc);
++                        rc = dfs_read(dfs, obj, &sgl, off, &ret, NULL);
++                        if (rc)
++                                ERRF("dfs_read(%p, %lld) failed (%d): %s\n",
++                                     (void*)ptr, remaining, rc, strerror(rc));
++                        if (ret == 0)
++                                ERRF("dfs_read(%p, %lld) returned EOF prematurely",
++                                     (void*)ptr, remaining);
                  }
  
                  if (ret < remaining) {
@@ -1727,7 +2054,7 @@ index e7b1d6b..8e6b2a7 100755
                                  exit(-1);
                          if (xferRetries > MAX_RETRY)
                                  ERR("too many retries -- aborting");
-@@ -680,7 +766,7 @@ DFS_Xfer(int access, void *file, IOR_size_t *buffer, IOR_offset_t length,
+@@ -680,7 +827,7 @@ DFS_Xfer(int access, void *file, IOR_size_t *buffer, IOR_offset_t length,
   * Perform fsync().
   */
  static void
@@ -1736,7 +2063,7 @@ index e7b1d6b..8e6b2a7 100755
  {
          /* no cache in DFS, so this is a no-op currently */
  	dfs_sync(dfs);
-@@ -691,7 +777,7 @@ DFS_Fsync(void *fd, IOR_param_t * param)
+@@ -691,7 +838,7 @@ DFS_Fsync(void *fd, IOR_param_t * param)
   * Perform sync() on the dfs mount.
   */
  static void
@@ -1745,7 +2072,7 @@ index e7b1d6b..8e6b2a7 100755
  {
          /* no cache in DFS, so this is a no-op currently */
  	dfs_sync(dfs);
-@@ -702,7 +788,7 @@ DFS_Sync(IOR_param_t * param)
+@@ -702,7 +849,7 @@ DFS_Sync(IOR_param_t * param)
   * Close a file through the DFS interface.
   */
  static void
@@ -1754,7 +2081,7 @@ index e7b1d6b..8e6b2a7 100755
  {
          dfs_release((dfs_obj_t *)fd);
  }
-@@ -711,7 +797,7 @@ DFS_Close(void *fd, IOR_param_t * param)
+@@ -711,7 +858,7 @@ DFS_Close(void *fd, IOR_param_t * param)
   * Delete a file through the DFS interface.
   */
  static void
@@ -1763,7 +2090,22 @@ index e7b1d6b..8e6b2a7 100755
  {
  	char *name = NULL, *dir_name = NULL;
  	dfs_obj_t *parent = NULL;
-@@ -748,56 +834,49 @@ static char* DFS_GetVersion()
+@@ -725,11 +872,11 @@ DFS_Delete(char *testFileName, IOR_param_t * param)
+ 
+         parent = lookup_insert_dir(dir_name, NULL);
+         if (parent == NULL)
+-                GERR("Failed to lookup parent dir");
++                DERR("Failed to lookup parent: %s", dir_name);
+ 
+ 	rc = dfs_remove(dfs, parent, name, false, NULL);
+-        DCHECK(rc, "dfs_remove() of %s Failed", name);
+-
++        DCHECK(rc, "Failed to remove path %s", testFileName);
++out:
+ 	if (name)
+ 		free(name);
+ 	if (dir_name)
+@@ -748,56 +895,67 @@ static char* DFS_GetVersion()
   * Use DFS stat() to return aggregate file size.
   */
  static IOR_offset_t
@@ -1835,7 +2177,26 @@ index e7b1d6b..8e6b2a7 100755
 -DFS_Statfs(const char *path, ior_aiori_statfs_t *sfs, IOR_param_t * param)
 +DFS_Statfs(const char *path, ior_aiori_statfs_t *sfs, aiori_mod_opt_t * param)
  {
-         return 0;
+-        return 0;
++        daos_pool_info_t info = {.pi_bits = DPI_SPACE};
++        int rc;
++
++        rc = daos_pool_query(poh, NULL, &info, NULL, NULL);
++        DCHECK(rc, "Failed to query pool");
++
++        sfs->f_blocks = info.pi_space.ps_space.s_total[DAOS_MEDIA_SCM]
++                + info.pi_space.ps_space.s_total[DAOS_MEDIA_NVME];
++        sfs->f_bfree = info.pi_space.ps_space.s_free[DAOS_MEDIA_SCM]
++                + info.pi_space.ps_space.s_free[DAOS_MEDIA_NVME];
++        sfs->f_bsize = 1;
++        sfs->f_files = -1;
++        sfs->f_ffree = -1;
++        sfs->f_bavail = sfs->f_bfree;
++
++out:
++        if (rc)
++                rc = -1;
++        return rc;
  }
  
  static int
@@ -1844,25 +2205,133 @@ index e7b1d6b..8e6b2a7 100755
  {
          dfs_obj_t *parent = NULL;
  	char *name = NULL, *dir_name = NULL;
-@@ -825,7 +904,7 @@ DFS_Mkdir(const char *path, mode_t mode, IOR_param_t * param)
+@@ -812,20 +970,64 @@ DFS_Mkdir(const char *path, mode_t mode, IOR_param_t * param)
+ 
+         parent = lookup_insert_dir(dir_name, NULL);
+         if (parent == NULL)
+-                GERR("Failed to lookup parent dir");
++                DERR("Failed to lookup parent: %s", dir_name);
+ 
+         rc = dfs_mkdir(dfs, parent, name, mode, dir_oclass);
+-        DCHECK(rc, "dfs_mkdir() of %s Failed", name);
+ 
++out:
+ 	if (name)
+ 		free(name);
+ 	if (dir_name)
+ 		free(dir_name);
++        if (rc)
++                rc = -1;
+ 	return rc;
  }
  
  static int
 -DFS_Rmdir(const char *path, IOR_param_t * param)
++DFS_Rename(const char *oldfile, const char *newfile, aiori_mod_opt_t * param)
++{
++        dfs_obj_t *old_parent = NULL, *new_parent = NULL;
++	char *old_name = NULL, *old_dir_name = NULL;
++	char *new_name = NULL, *new_dir_name = NULL;
++	int rc;
++
++	rc = parse_filename(oldfile, &old_name, &old_dir_name);
++        DCHECK(rc, "Failed to parse path %s", oldfile);
++	assert(old_dir_name);
++        assert(old_name);
++
++	rc = parse_filename(newfile, &new_name, &new_dir_name);
++        DCHECK(rc, "Failed to parse path %s", newfile);
++	assert(new_dir_name);
++        assert(new_name);
++
++        old_parent = lookup_insert_dir(old_dir_name, NULL);
++        if (old_parent == NULL)
++                DERR("Failed to lookup parent: %s", old_dir_name);
++
++        new_parent = lookup_insert_dir(new_dir_name, NULL);
++        if (new_parent == NULL)
++                DERR("Failed to lookup parent: %s", new_dir_name);
++
++        rc = dfs_move(dfs, old_parent, old_name, new_parent, new_name, NULL);
++
++out:
++	if (old_name)
++		free(old_name);
++	if (old_dir_name)
++		free(old_dir_name);
++	if (new_name)
++		free(new_name);
++	if (new_dir_name)
++		free(new_dir_name);
++        if (rc)
++                return -1;
++	return rc;
++}
++
++static int
 +DFS_Rmdir(const char *path, aiori_mod_opt_t * param)
  {
          dfs_obj_t *parent = NULL;
  	char *name = NULL, *dir_name = NULL;
-@@ -854,7 +933,7 @@ DFS_Rmdir(const char *path, IOR_param_t * param)
+@@ -839,11 +1041,11 @@ DFS_Rmdir(const char *path, IOR_param_t * param)
+ 
+         parent = lookup_insert_dir(dir_name, NULL);
+         if (parent == NULL)
+-                GERR("Failed to lookup parent dir");
++                DERR("Failed to lookup parent: %s", dir_name);
+ 
+ 	rc = dfs_remove(dfs, parent, name, false, NULL);
+-        DCHECK(rc, "dfs_remove() of %s Failed", name);
+ 
++out:
+ 	if (name)
+ 		free(name);
+ 	if (dir_name)
+@@ -854,24 +1056,42 @@ DFS_Rmdir(const char *path, IOR_param_t * param)
  }
  
  static int
 -DFS_Access(const char *path, int mode, IOR_param_t * param)
 +DFS_Access(const char *path, int mode, aiori_mod_opt_t * param)
  {
++        dfs_obj_t *parent = NULL;
          dfs_obj_t *obj = NULL;
-         mode_t fmode;
-@@ -871,7 +950,7 @@ DFS_Access(const char *path, int mode, IOR_param_t * param)
+-        mode_t fmode;
++	char *name = NULL, *dir_name = NULL;
++	int rc;
+ 
+-        obj = lookup_insert_dir(path, &fmode);
+-        if (obj == NULL)
+-                return -1;
++	rc = parse_filename(path, &name, &dir_name);
++        DCHECK(rc, "Failed to parse path %s", path);
+ 
+-        /** just close if it's a file */
+-        if (S_ISREG(fmode))
+-                dfs_release(obj);
++	assert(dir_name);
++        assert(name);
+ 
+-        return 0;
++        parent = lookup_insert_dir(dir_name, NULL);
++        if (parent == NULL)
++                DERR("Failed to lookup parent: %s", dir_name);
++
++        if (strcmp(name, "/") == 0) {
++                free(name);
++                name = NULL;
++        }
++
++	rc = dfs_access(dfs, parent, name, mode);
++
++out:
++	if (name)
++		free(name);
++	if (dir_name)
++		free(dir_name);
++        if (rc)
++                return -1;
++	return rc;
  }
  
  static int
@@ -1871,19 +2340,33 @@ index e7b1d6b..8e6b2a7 100755
  {
          dfs_obj_t *parent = NULL;
  	char *name = NULL, *dir_name = NULL;
-@@ -888,7 +967,6 @@ DFS_Stat(const char *path, struct stat *buf, IOR_param_t * param)
-                 GERR("Failed to lookup parent dir");
+@@ -885,11 +1105,11 @@ DFS_Stat(const char *path, struct stat *buf, IOR_param_t * param)
+ 
+         parent = lookup_insert_dir(dir_name, NULL);
+         if (parent == NULL)
+-                GERR("Failed to lookup parent dir");
++                DERR("Failed to lookup parent: %s", dir_name);
  
  	rc = dfs_stat(dfs, parent, name, buf);
 -        DCHECK(rc, "dfs_stat() of Failed (%d)", rc);
  
++out:
  	if (name)
  		free(name);
+ 	if (dir_name)
 diff --git a/src/aiori-DUMMY.c b/src/aiori-DUMMY.c
-index f368c79..4769de0 100755
+index f368c79..8a4d814 100755
 --- a/src/aiori-DUMMY.c
 +++ b/src/aiori-DUMMY.c
-@@ -25,7 +25,7 @@ typedef struct {
+@@ -19,13 +19,15 @@
+ /************************** O P T I O N S *****************************/
+ typedef struct {
+   uint64_t delay_creates;
++  uint64_t delay_close;
++  uint64_t delay_sync;
+   uint64_t delay_xfer;
+   int delay_rank_0_only;
+ } dummy_options_t;
  
  static char * current = (char*) 1;
  
@@ -1892,7 +2375,7 @@ index f368c79..4769de0 100755
    dummy_options_t * o = malloc(sizeof(dummy_options_t));
    if (init_values != NULL){
      memcpy(o, init_values, sizeof(dummy_options_t));
-@@ -33,7 +33,7 @@ static option_help * DUMMY_options(void ** init_backend_options, void * init_val
+@@ -33,10 +35,12 @@ static option_help * DUMMY_options(void ** init_backend_options, void * init_val
      memset(o, 0, sizeof(dummy_options_t));
    }
  
@@ -1901,7 +2384,12 @@ index f368c79..4769de0 100755
  
    option_help h [] = {
        {0, "dummy.delay-create",        "Delay per create in usec", OPTION_OPTIONAL_ARGUMENT, 'l', & o->delay_creates},
-@@ -46,30 +46,38 @@ static option_help * DUMMY_options(void ** init_backend_options, void * init_val
++      {0, "dummy.delay-close",         "Delay per close in usec", OPTION_OPTIONAL_ARGUMENT, 'l', & o->delay_close},
++      {0, "dummy.delay-sync",          "Delay for sync in usec", OPTION_OPTIONAL_ARGUMENT, 'l', & o->delay_sync},
+       {0, "dummy.delay-xfer",          "Delay per xfer in usec", OPTION_OPTIONAL_ARGUMENT, 'l', & o->delay_xfer},
+       {0, "dummy.delay-only-rank0",    "Delay only Rank0", OPTION_FLAG, 'd', & o->delay_rank_0_only},
+       LAST_OPTION
+@@ -46,30 +50,38 @@ static option_help * DUMMY_options(void ** init_backend_options, void * init_val
    return help;
  }
  
@@ -1946,13 +2434,20 @@ index f368c79..4769de0 100755
  {
    if(verbose > 4){
      fprintf(out_logfile, "DUMMY fsync %p\n", fd);
-@@ -77,18 +85,18 @@ static void DUMMY_Fsync(void *fd, IOR_param_t * param)
+@@ -77,18 +89,33 @@ static void DUMMY_Fsync(void *fd, IOR_param_t * param)
  }
  
  
 -static void DUMMY_Sync(IOR_param_t * param)
 +static void DUMMY_Sync(aiori_mod_opt_t * options)
  {
++  dummy_options_t * o = (dummy_options_t*) options;
++  if (o->delay_sync){
++    if (! o->delay_rank_0_only || (o->delay_rank_0_only && rank == 0)){
++      struct timespec wait = { o->delay_sync / 1000 / 1000, 1000l * (o->delay_sync % 1000000)};
++      nanosleep( & wait, NULL);
++    }
++  }
  }
  
 -static void DUMMY_Close(void *fd, IOR_param_t * param)
@@ -1961,6 +2456,14 @@ index f368c79..4769de0 100755
    if(verbose > 4){
      fprintf(out_logfile, "DUMMY close %p\n", fd);
    }
++  
++  dummy_options_t * o = (dummy_options_t*) options;
++  if (o->delay_close){
++    if (! o->delay_rank_0_only || (o->delay_rank_0_only && rank == 0)){
++      struct timespec wait = { o->delay_close / 1000 / 1000, 1000l * (o->delay_close % 1000000)};
++      nanosleep( & wait, NULL);
++    }
++  }
  }
  
 -static void DUMMY_Delete(char *testFileName, IOR_param_t * param)
@@ -1968,7 +2471,7 @@ index f368c79..4769de0 100755
  {
      if(verbose > 4){
        fprintf(out_logfile, "DUMMY delete: %s\n", testFileName);
-@@ -100,7 +108,7 @@ static char * DUMMY_getVersion()
+@@ -100,7 +127,7 @@ static char * DUMMY_getVersion()
    return "0.5";
  }
  
@@ -1977,7 +2480,7 @@ index f368c79..4769de0 100755
  {
    if(verbose > 4){
      fprintf(out_logfile, "DUMMY getFileSize: %s\n", testFileName);
-@@ -108,11 +116,11 @@ static IOR_offset_t DUMMY_GetFileSize(IOR_param_t * test, MPI_Comm testComm, cha
+@@ -108,11 +135,11 @@ static IOR_offset_t DUMMY_GetFileSize(IOR_param_t * test, MPI_Comm testComm, cha
    return 0;
  }
  
@@ -1991,7 +2494,7 @@ index f368c79..4769de0 100755
    if (o->delay_xfer){
      if (! o->delay_rank_0_only || (o->delay_rank_0_only && rank == 0)){
        struct timespec wait = {o->delay_xfer / 1000 / 1000, 1000l * (o->delay_xfer % 1000000)};
-@@ -122,7 +130,7 @@ static IOR_offset_t DUMMY_Xfer(int access, void *file, IOR_size_t * buffer, IOR_
+@@ -122,7 +149,7 @@ static IOR_offset_t DUMMY_Xfer(int access, void *file, IOR_size_t * buffer, IOR_
    return length;
  }
  
@@ -2000,46 +2503,46 @@ index f368c79..4769de0 100755
    stat->f_bsize = 1;
    stat->f_blocks = 1;
    stat->f_bfree = 1;
-@@ -132,26 +140,45 @@ static int DUMMY_statfs (const char * path, ior_aiori_statfs_t * stat, IOR_param
+@@ -132,26 +159,45 @@ static int DUMMY_statfs (const char * path, ior_aiori_statfs_t * stat, IOR_param
    return 0;
  }
  
 -static int DUMMY_mkdir (const char *path, mode_t mode, IOR_param_t * param){
 +static int DUMMY_mkdir (const char *path, mode_t mode, aiori_mod_opt_t * options){
-+  return 0;
-+}
-+
-+static int DUMMY_rmdir (const char *path, aiori_mod_opt_t * options){
-+  return 0;
-+}
-+
-+static int DUMMY_access (const char *path, int mode, aiori_mod_opt_t * options){
    return 0;
  }
  
 -static int DUMMY_rmdir (const char *path, IOR_param_t * param){
-+static int DUMMY_stat (const char *path, struct stat *buf, aiori_mod_opt_t * options){
++static int DUMMY_rmdir (const char *path, aiori_mod_opt_t * options){
    return 0;
  }
  
 -static int DUMMY_access (const char *path, int mode, IOR_param_t * param){
-+static int DUMMY_rename (const char *path, const char *path2, aiori_mod_opt_t * options){
++static int DUMMY_access (const char *path, int mode, aiori_mod_opt_t * options){
    return 0;
  }
  
 -static int DUMMY_stat (const char *path, struct stat *buf, IOR_param_t * param){
-+
-+static int DUMMY_check_params(aiori_mod_opt_t * options){
++static int DUMMY_stat (const char *path, struct stat *buf, aiori_mod_opt_t * options){
    return 0;
  }
  
 -static int DUMMY_check_params(IOR_param_t * test){
 -  return 1;
++static int DUMMY_rename (const char *path, const char *path2, aiori_mod_opt_t * options){
++  return 0;
++}
++
++
++static int DUMMY_check_params(aiori_mod_opt_t * options){
++  return 0;
+ }
+ 
 +static void DUMMY_init(aiori_mod_opt_t * options){
 +  WARN("DUMMY initialized");
 +  count_init++;
- }
- 
++}
++
 +static void DUMMY_final(aiori_mod_opt_t * options){
 +  WARN("DUMMY finalized");
 +  if(count_init <= 0){
@@ -2052,7 +2555,7 @@ index f368c79..4769de0 100755
  ior_aiori_t dummy_aiori = {
          .name = "DUMMY",
          .name_legacy = NULL,
-@@ -166,13 +193,13 @@ ior_aiori_t dummy_aiori = {
+@@ -166,13 +212,13 @@ ior_aiori_t dummy_aiori = {
          .statfs = DUMMY_statfs,
          .mkdir = DUMMY_mkdir,
          .rmdir = DUMMY_rmdir,
@@ -2351,7 +2854,7 @@ index a7af0ea..e94022f 100644
  	.enable_mdtest = true,
  };
 diff --git a/src/aiori-HDF5.c b/src/aiori-HDF5.c
-index ab329db..bd4f29f 100755
+index ab329db..7f4b72e 100755
 --- a/src/aiori-HDF5.c
 +++ b/src/aiori-HDF5.c
 @@ -81,39 +81,53 @@
@@ -2463,7 +2966,7 @@ index ab329db..bd4f29f 100755
 +    /* no-fill option not available until hdf5-1.6.x */
 +#if (H5_VERS_MAJOR > 0 && H5_VERS_MINOR > 5)
 +#else
-+    ERRF("'no fill' option not available in HDF5");
++    ERR("'no fill' option not available in HDF5");
 +#endif
 +#else
 +    WARN("unable to determine HDF5 version for 'no fill' usage");
@@ -5657,7 +6160,7 @@ index 0000000..79b41b4
 +    return(aggFileSizeFromStat);
 +} /* PMDK_GetFileSize() */
 diff --git a/src/aiori-POSIX.c b/src/aiori-POSIX.c
-index 463a9c8..72f7f53 100755
+index 463a9c8..0f2c545 100755
 --- a/src/aiori-POSIX.c
 +++ b/src/aiori-POSIX.c
 @@ -34,7 +34,7 @@
@@ -6095,7 +6598,7 @@ index 463a9c8..72f7f53 100755
                  if (verbose >= VERBOSE_1) {
 -                        fprintf(stdout,
 -                                "** Disabling lustre range locking **\n");
-+                        EINFO("** Disabling lustre range locking **\n");
++                        EINFO("** Disabling lustre range locking **\n", 0);
                  }
 -                if (ioctl(*fd, LL_IOC_SETFLAGS, &lustre_ioctl_flags) == -1)
 -                        ERRF("ioctl(%d, LL_IOC_SETFLAGS, ...) failed", *fd);
@@ -9452,7 +9955,7 @@ index 01136fb..1b21a00 100644
  
    if (outputFormat == OUTPUT_DEFAULT){
 diff --git a/src/ior.c b/src/ior.c
-index 361a9a4..cf96cd8 100755
+index 361a9a4..a4af7b3 100755
 --- a/src/ior.c
 +++ b/src/ior.c
 @@ -33,6 +33,10 @@
@@ -10626,17 +11129,14 @@ index 361a9a4..cf96cd8 100755
          if (test->reorderTasks == TRUE && test->reorderTasksRandom == TRUE)
                  ERR("Both Constant and Random task re-ordering specified. Choose one and resubmit");
          if (test->randomOffset && test->reorderTasksRandom
-@@ -1674,55 +1519,23 @@ static void ValidateTests(IOR_param_t * test)
+@@ -1674,55 +1519,21 @@ static void ValidateTests(IOR_param_t * test)
          if (test->randomOffset && test->reorderTasks
              && test->filePerProc == FALSE)
                  ERR("random offset and constant reorder tasks specified with single-shared-file. Choose one and resubmit");
 -        if (test->randomOffset && test->checkRead)
 -                ERR("random offset not available with read check option (use write check)");
 -        if (test->randomOffset && test->storeFileOffset)
-+        if (test->randomOffset && test->checkRead && test->randomSeed == -1)
-+                ERR("random offset with read check option requires to set the random seed");
-+        if (test->randomOffset && test->dataPacketType == DATA_OFFSET)
-                 ERR("random offset not available with store file offset option)");
+-                ERR("random offset not available with store file offset option)");
 -
 -
 -        if ((strcasecmp(test->api, "MPIIO") == 0) && test->randomOffset
@@ -10645,6 +11145,8 @@ index 361a9a4..cf96cd8 100755
 -        if ((strcasecmp(test->api, "MPIIO") == 0) && test->randomOffset
 -            && test->useFileView)
 -                ERR("random offset not available with MPIIO fileviews");
++        if (test->randomOffset && test->checkRead && test->randomSeed == -1)
++                ERR("random offset with read check option requires to set the random seed");
          if ((strcasecmp(test->api, "HDF5") == 0) && test->randomOffset)
                  ERR("random offset not available with HDF5");
          if ((strcasecmp(test->api, "NCMPI") == 0) && test->randomOffset)
@@ -10689,7 +11191,7 @@ index 361a9a4..cf96cd8 100755
              ERR("The backend returned that the test parameters are invalid.");
            }
          }
-@@ -1730,158 +1543,112 @@ static void ValidateTests(IOR_param_t * test)
+@@ -1730,158 +1541,112 @@ static void ValidateTests(IOR_param_t * test)
  
  /**
   * Returns a precomputed array of IOR_offset_t for the inner benchmark loop.
@@ -10907,7 +11409,7 @@ index 361a9a4..cf96cd8 100755
            if (amtXferred != transfer)
                    ERR("cannot read from file");
            if (test->interIODelay > 0){
-@@ -1889,79 +1656,134 @@ static IOR_offset_t WriteOrReadSingle(IOR_offset_t pairCnt, IOR_offset_t *offset
+@@ -1889,79 +1654,134 @@ static IOR_offset_t WriteOrReadSingle(IOR_offset_t pairCnt, IOR_offset_t *offset
              nanosleep( & wait, NULL);
            }
    } else if (access == WRITECHECK) {
@@ -10952,7 +11454,7 @@ index 361a9a4..cf96cd8 100755
 +  IOR_offset_t transferCount;
 +  int errors;
 +  ioBuffers->buffer = randomPrefillBuffer;
-+  for (int i = startSegment; i < endSegment; i++){
++  for (IOR_offset_t i = startSegment; i < endSegment; i++){
 +    for (int j = 0; j < offsets; j++) {
 +      IOR_offset_t offset = j * test->randomPrefillBlocksize;
 +      if (test->filePerProc) {
@@ -10982,7 +11484,7 @@ index 361a9a4..cf96cd8 100755
          IOR_offset_t dataMoved = 0;     /* for data rate calculation */
          double startForStonewall;
          int hitStonewall;
-+        int i, j;
++        IOR_offset_t i, j;
          IOR_point_t *point = ((access == WRITE) || (access == WRITECHECK)) ?
                               &results->write : &results->read;
  
@@ -11077,7 +11579,7 @@ index 361a9a4..cf96cd8 100755
          }
          if (test->stoneWallingWearOut){
            if (verbose >= VERBOSE_1){
-@@ -1977,32 +1799,57 @@ static IOR_offset_t WriteOrRead(IOR_param_t *test, IOR_results_t *results,
+@@ -1977,32 +1797,57 @@ static IOR_offset_t WriteOrRead(IOR_param_t *test, IOR_results_t *results,
                                    1, MPI_LONG_LONG_INT, MPI_MIN, 0, testComm), "cannot reduce pairs moved");
            MPI_CHECK(MPI_Reduce(& data_moved_ll, &point->stonewall_min_data_accessed,
                                    1, MPI_LONG_LONG_INT, MPI_MIN, 0, testComm), "cannot reduce pairs moved");
@@ -11338,10 +11840,10 @@ index 758b048..2effa9a 100755
  /*
   * This function runs IOR given by command line, useful for testing
 diff --git a/src/iordef.h b/src/iordef.h
-index 78cf1d3..79f98f1 100755
+index 78cf1d3..6b4e57d 100755
 --- a/src/iordef.h
 +++ b/src/iordef.h
-@@ -18,8 +18,12 @@
+@@ -18,8 +18,13 @@
  #include <stdio.h>
  #include <stdlib.h>
  #include <string.h>
@@ -11351,12 +11853,13 @@ index 78cf1d3..79f98f1 100755
 +typedef enum {
 +  DATA_TIMESTAMP, /* Will not include any offset, hence each buffer will be the same */
 +  DATA_OFFSET,
-+  DATA_INCOMPRESSIBLE /* Will include the offset as well */
++  DATA_INCOMPRESSIBLE,  /* Will include the offset as well */
++  DATA_RANDOM           /* fully scrambled blocks */
 +} ior_dataPacketType_e;
  
  #ifdef _WIN32
  #   define _CRT_SECURE_NO_WARNINGS
-@@ -52,13 +56,6 @@
+@@ -52,13 +57,6 @@
  #   include <limits.h>
  #endif
  
@@ -11370,7 +11873,7 @@ index 78cf1d3..79f98f1 100755
  /*************************** D E F I N I T I O N S ****************************/
  
  enum OutputFormat_t{
-@@ -115,117 +112,11 @@ enum OutputFormat_t{
+@@ -115,117 +113,11 @@ enum OutputFormat_t{
  #define DELIMITERS         " \t\r\n="          /* ReadScript() */
  #define FILENAME_DELIMITER '@'                 /* ParseFileName() */
  
@@ -11509,7 +12012,7 @@ index 0000000..bb94126
 +}
 diff --git a/src/md-workbench.c b/src/md-workbench.c
 new file mode 100644
-index 0000000..4b3372d
+index 0000000..2c4d305
 --- /dev/null
 +++ b/src/md-workbench.c
 @@ -0,0 +1,1053 @@
@@ -12341,7 +12844,7 @@ index 0000000..4b3372d
 +  {'w', "stonewall-timer", "Stop each benchmark iteration after the specified seconds (if not used with -W this leads to process-specific progress!)", OPTION_OPTIONAL_ARGUMENT, 'd', & o.stonewall_timer},
 +  {'W', "stonewall-wear-out", "Stop with stonewall after specified time and use a soft wear-out phase -- all processes perform the same number of iterations", OPTION_FLAG, 'd', & o.stonewall_timer_wear_out},
 +  {'X', "verify-read", "Verify the data on read", OPTION_FLAG, 'd', & o.verify_read},
-+  {0, "dataPacketType", "type of packet that will be created [offset|incompressible|timestamp|o|i|t]", OPTION_OPTIONAL_ARGUMENT, 's', & o.packetTypeStr},
++  {0, "dataPacketType", "type of packet that will be created [offset|incompressible|timestamp|random|o|i|t|r]", OPTION_OPTIONAL_ARGUMENT, 's', & o.packetTypeStr},
 +  {0, "allocateBufferOnGPU", "Allocate the buffer on the GPU.", OPTION_FLAG, 'd', & o.gpu_memory_flags},
 +  {0, "start-item", "The iteration number of the item to start with, allowing to offset the operations", OPTION_OPTIONAL_ARGUMENT, 'l', & o.start_item_number},
 +  {0, "print-detailed-stats", "Print detailed machine parsable statistics.", OPTION_FLAG, 'd', & o.print_detailed_stats},
@@ -12432,9 +12935,9 @@ index 0000000..4b3372d
 +    o.phase_cleanup = o.phase_precreate = o.phase_benchmark = 1;
 +  }
 +  if (! o.phase_precreate && o.phase_benchmark && o.stonewall_timer && ! o.stonewall_timer_wear_out){
-+    if(o.rank == 0)
-+      ERR("Invalid options, if running only the benchmark phase using -2 with stonewall option then use stonewall wear-out");
-+    exit(1);
++    if(o.rank == 0){
++      WARN("Dangerous option combination: and benchmark phase (-2) using with stonewall option (-w) without stonewall wear-out will lead to files that cannot be cleaned up using the cleanup phase(-3). Also multiple iterations are problematic.");
++    }
 +  }
 +  if( o.random_seed == -1 ){
 +      o.random_seed = time(NULL);
@@ -12615,7 +13118,7 @@ index 0000000..394a43c
 +
 +#endif
 diff --git a/src/mdtest.c b/src/mdtest.c
-index de0c52a..3c49a85 100644
+index de0c52a..6e6dcb2 100644
 --- a/src/mdtest.c
 +++ b/src/mdtest.c
 @@ -76,6 +76,8 @@
@@ -13338,9 +13841,12 @@ index de0c52a..3c49a85 100644
                  strcpy(item, temp);
              }
          }
-@@ -713,28 +720,37 @@ void mdtest_read(int random, int dirs, const long dir_iter, char *path) {
+@@ -712,29 +719,40 @@ void mdtest_read(int random, int dirs, const long dir_iter, char *path) {
+         /* below temp used to be hiername */
          VERBOSE(3,5,"mdtest_read file: %s", item);
  
++        o.hints.filePerProc = ! o.shared_file;
++
          /* open file for reading */
 -        param.openFlags = O_RDONLY;
 -        aiori_fh = backend->open (item, &param);
@@ -13388,7 +13894,7 @@ index de0c52a..3c49a85 100644
      }
  }
  
-@@ -749,40 +765,40 @@ void collective_create_remove(const int create, const int dirs, const int ntasks
+@@ -749,40 +767,40 @@ void collective_create_remove(const int create, const int dirs, const int ntasks
      for (int i = 0 ; i < ntasks ; ++i) {
          memset(temp, 0, MAX_PATHLEN);
  
@@ -13453,7 +13959,7 @@ index de0c52a..3c49a85 100644
          }
  
          /* Now that everything is set up as it should be, do the create or remove */
-@@ -792,61 +808,155 @@ void collective_create_remove(const int create, const int dirs, const int ntasks
+@@ -792,61 +810,155 @@ void collective_create_remove(const int create, const int dirs, const int ntasks
      }
  
      /* reset all of the item names */
@@ -13502,9 +14008,9 @@ index de0c52a..3c49a85 100644
 +        sprintf(o.unique_rm_dir, "%s/mdtest_tree.%d.0", o.testdir,
 +                (0+(4*o.nstride))%ntasks);
 +        sprintf(o.unique_rm_uni_dir, "%s", o.testdir);
-     }
- }
- 
++    }
++}
++
 +void rename_dir_test(const int dirs, const long dir_iter, const char *path, rank_progress_t * progress) {
 +    uint64_t parent_dir, item_num = 0;
 +    char item[MAX_PATHLEN], temp[MAX_PATHLEN];
@@ -13573,9 +14079,9 @@ index de0c52a..3c49a85 100644
 +        }
 +
 +        strcpy(item_last, item);
-+    }
-+}
-+
+     }
+ }
+ 
 +static void updateResult(mdtest_results_t * res, mdtest_test_num_t test, uint64_t item_count, double t_start, double t_end, double t_end_before_barrier){
 +  res->time[test] = t_end - t_start;
 +  if(isfinite(t_end_before_barrier)){
@@ -13640,7 +14146,7 @@ index de0c52a..3c49a85 100644
              if (rank == 0) {
                  collective_create_remove(1, 1, ntasks, temp_path, progress);
              }
-@@ -855,80 +965,117 @@ void directory_test(const int iteration, const int ntasks, const char *path, ran
+@@ -855,80 +967,117 @@ void directory_test(const int iteration, const int ntasks, const char *path, ran
              create_remove_items(0, 1, 1, 0, temp_path, 0, progress);
          }
        }
@@ -13746,9 +14252,7 @@ index de0c52a..3c49a85 100644
 +        } else {
 +            sprintf( temp_path, "%s/%s", o.testdir, path );
 +        }
- 
--    if (remove_only) {
--      for (int dir_iter = 0; dir_iter < directory_loops; dir_iter ++){
++
 +        VERBOSE(3,5,"rename path is '%s'", temp_path );
 +
 +        rename_dir_test(1, dir_iter, temp_path, progress);
@@ -13758,7 +14262,9 @@ index de0c52a..3c49a85 100644
 +      t_end = GetTimeStamp();
 +      updateResult(res, MDTEST_DIR_RENAME_NUM, o.items, t_start, t_end, t_end_before_barrier);
 +    }
-+
+ 
+-    if (remove_only) {
+-      for (int dir_iter = 0; dir_iter < directory_loops; dir_iter ++){
 +    /* remove phase */
 +    if (o.remove_only) {
 +      phase_prepare();
@@ -13786,7 +14292,7 @@ index de0c52a..3c49a85 100644
              if (rank == 0) {
                  collective_create_remove(0, 1, ntasks, temp_path, progress);
              }
-@@ -936,234 +1083,231 @@ void directory_test(const int iteration, const int ntasks, const char *path, ran
+@@ -936,234 +1085,231 @@ void directory_test(const int iteration, const int ntasks, const char *path, ran
              create_remove_items(0, 1, 0, 0, temp_path, 0, progress);
          }
        }
@@ -14157,7 +14663,7 @@ index de0c52a..3c49a85 100644
              if (rank == 0) {
                  collective_create_remove(0, 0, ntasks, temp_path, progress);
              }
-@@ -1172,12 +1316,14 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
+@@ -1172,12 +1318,14 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
              create_remove_items(0, 0, 0, 0, temp_path, 0, progress);
          }
        }
@@ -14176,7 +14682,7 @@ index de0c52a..3c49a85 100644
              unique_dir_access(RM_UNI_DIR, temp_path);
          } else {
              strcpy( temp_path, path );
-@@ -1186,228 +1332,391 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
+@@ -1186,228 +1334,391 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
          VERBOSE(3,5,"file_test: rm unique directories path is '%s'", temp_path );
      }
  
@@ -14188,13 +14694,13 @@ index de0c52a..3c49a85 100644
  
 -    if(num_dirs_in_tree_calc){ /* this is temporary fix needed when using -n and -i together */
 -      items *= num_dirs_in_tree_calc;
-+    VERBOSE(1,-1,"  File creation     : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_CREATE_NUM], o.summary_table[iteration].rate[4]);
++    VERBOSE(1,-1,"  File creation     : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_CREATE_NUM], o.summary_table[iteration].rate[MDTEST_FILE_CREATE_NUM]);
 +    if(o.summary_table[iteration].stonewall_time[MDTEST_FILE_CREATE_NUM]){
 +      VERBOSE(1,-1,"  File creation (stonewall): %14.3f sec, %14.3f ops/sec", o.summary_table[iteration].stonewall_time[MDTEST_FILE_CREATE_NUM], o.summary_table[iteration].stonewall_item_sum[MDTEST_FILE_CREATE_NUM]);
      }
-+    VERBOSE(1,-1,"  File stat         : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_STAT_NUM], o.summary_table[iteration].rate[5]);
-+    VERBOSE(1,-1,"  File read         : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_READ_NUM], o.summary_table[iteration].rate[6]);
-+    VERBOSE(1,-1,"  File removal      : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_REMOVE_NUM], o.summary_table[iteration].rate[7]);
++    VERBOSE(1,-1,"  File stat         : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_STAT_NUM], o.summary_table[iteration].rate[MDTEST_FILE_STAT_NUM]);
++    VERBOSE(1,-1,"  File read         : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_READ_NUM], o.summary_table[iteration].rate[MDTEST_FILE_READ_NUM]);
++    VERBOSE(1,-1,"  File removal      : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_REMOVE_NUM], o.summary_table[iteration].rate[MDTEST_FILE_REMOVE_NUM]);
 +}
  
 -    /* calculate times */
@@ -14746,7 +15252,7 @@ index de0c52a..3c49a85 100644
      }
  
      /* check for no barriers with shifting processes for different phases.
-@@ -1415,63 +1724,95 @@ void valid_tests() {
+@@ -1415,63 +1726,95 @@ void valid_tests() {
         race conditions that may cause errors stat'ing or deleting after
         creates.
      */
@@ -14858,7 +15364,7 @@ index de0c52a..3c49a85 100644
  }
  
  void show_file_system_size(char *file_system) {
-@@ -1492,7 +1833,7 @@ void show_file_system_size(char *file_system) {
+@@ -1492,7 +1835,7 @@ void show_file_system_size(char *file_system) {
  
      VERBOSE(1,-1,"Entering show_file_system_size on %s", file_system );
  
@@ -14867,7 +15373,7 @@ index de0c52a..3c49a85 100644
      if (0 != ret) {
          FAIL("unable to stat file system %s", file_system);
      }
-@@ -1530,42 +1871,6 @@ void show_file_system_size(char *file_system) {
+@@ -1530,42 +1873,6 @@ void show_file_system_size(char *file_system) {
      return;
  }
  
@@ -14910,7 +15416,7 @@ index de0c52a..3c49a85 100644
  void create_remove_directory_tree(int create,
                                    int currDepth, char* path, int dirNum, rank_progress_t * progress) {
  
-@@ -1576,16 +1881,16 @@ void create_remove_directory_tree(int create,
+@@ -1576,16 +1883,16 @@ void create_remove_directory_tree(int create,
      VERBOSE(1,5,"Entering create_remove_directory_tree on %s, currDepth = %d...", path, currDepth );
  
      if (currDepth == 0) {
@@ -14931,7 +15437,7 @@ index de0c52a..3c49a85 100644
                  llapi_dir_set_default_lmv_stripe(dir, -1, 0,
                                                   LMV_HASH_TYPE_FNV_1A_64,
                                                   NULL) == -1) {
-@@ -1598,35 +1903,35 @@ void create_remove_directory_tree(int create,
+@@ -1598,35 +1905,35 @@ void create_remove_directory_tree(int create,
  
          if (!create) {
              VERBOSE(2,5,"Remove directory '%s'", dir);
@@ -14977,7 +15483,7 @@ index de0c52a..3c49a85 100644
                  }
              }
  
-@@ -1636,12 +1941,11 @@ void create_remove_directory_tree(int create,
+@@ -1636,12 +1943,11 @@ void create_remove_directory_tree(int create,
      }
  }
  
@@ -14993,7 +15499,7 @@ index de0c52a..3c49a85 100644
    rank_progress_t * progress = & progress_o;
  
    /* start and end times of directory tree create/remove */
-@@ -1650,255 +1954,229 @@ static void mdtest_iteration(int i, int j, MPI_Group testgroup, mdtest_results_t
+@@ -1650,255 +1956,229 @@ static void mdtest_iteration(int i, int j, MPI_Group testgroup, mdtest_results_t
  
    VERBOSE(1,-1,"main: * iteration %d *", j+1);
  
@@ -15023,7 +15529,7 @@ index de0c52a..3c49a85 100644
 -        }
 +          /* internal node for branching, can be non-striped for children */
 +          if (o.global_dir_layout && o.unique_dir_per_task && llapi_dir_set_default_lmv_stripe(o.testdir, -1, 0, LMV_HASH_TYPE_FNV_1A_64, NULL) == -1) {
-+              EWARNF("Unable to reset to global default directory layout");
++              EWARNF("Unable to reset to global default directory layout", 0);
 +          }
  #endif /* HAVE_LUSTRE_LUSTREAPI */
 +      }
@@ -15386,7 +15892,7 @@ index de0c52a..3c49a85 100644
      struct {
          int first;
          int last;
-@@ -1908,6 +2186,7 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
+@@ -1908,6 +2188,7 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
      int last = 0;
      int stride = 1;
      int iterations = 1;
@@ -15394,7 +15900,7 @@ index de0c52a..3c49a85 100644
  
      verbose = 0;
      int no_barriers = 0;
-@@ -1918,67 +2197,94 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
+@@ -1918,67 +2199,94 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
      aiori_supported_apis(APIs, APIs_legacy, MDTEST);
      char apiStr[1024];
      sprintf(apiStr, "API for I/O [%s]", APIs);
@@ -15477,9 +15983,9 @@ index de0c52a..3c49a85 100644
 +      {'Y', NULL,        "call the sync command after each phase (included in the timing; note it causes all IO to be flushed from your node)", OPTION_FLAG, 'd', & o.call_sync},
 +      {'z', NULL,        "depth of hierarchical directory structure", OPTION_OPTIONAL_ARGUMENT, 'd', & o.depth},
 +      {'Z', NULL,        "print time instead of rate", OPTION_FLAG, 'd', & o.print_time},
++      {0, "dataPacketType", "type of packet that will be created [offset|incompressible|timestamp|random|o|i|t|r]", OPTION_OPTIONAL_ARGUMENT, 's', & packetType},
 +      {0, "run-cmd-before-phase", "call this external command before each phase (excluded from the timing)", OPTION_OPTIONAL_ARGUMENT, 's', & o.prologue},
 +      {0, "run-cmd-after-phase",  "call this external command after each phase (included in the timing)", OPTION_OPTIONAL_ARGUMENT, 's', & o.epilogue},
-+      {0, "dataPacketType", "type of packet that will be created [offset|incompressible|timestamp|o|i|t]", OPTION_OPTIONAL_ARGUMENT, 's', & packetType},
 +      {0, "allocateBufferOnGPU", "Allocate the buffer on the GPU.", OPTION_FLAG, 'd', & o.gpu_memory_flags},
 +      {0, "warningAsErrors",        "Any warning should lead to an error.", OPTION_FLAG, 'd', & aiori_warning_as_errors},
 +      {0, "saveRankPerformanceDetails", "Save the individual rank information into this CSV file.", OPTION_OPTIONAL_ARGUMENT, 's', & o.saveRankDetailsCSV},
@@ -15526,7 +16032,7 @@ index de0c52a..3c49a85 100644
  
      numNodes = GetNumNodes(testComm);
      numTasksOnNode0 = GetNumTasksOnNode0(testComm);
-@@ -1990,118 +2296,122 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
+@@ -1990,118 +2298,122 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
      }
  
      VERBOSE(0,-1,"-- started at %s --\n", PrintTimestamp());
@@ -15713,7 +16219,7 @@ index de0c52a..3c49a85 100644
          while (n>1) {
              n--;
  
-@@ -2120,121 +2430,132 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
+@@ -2120,121 +2432,132 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
               * element, and the kth element to the nth element.
               */
  
@@ -15905,7 +16411,7 @@ index de0c52a..3c49a85 100644
                  VERBOSE(0,-1,"%d tasks, "LLU" directories", i, items_all);
              }
          }
-@@ -2244,30 +2565,42 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
+@@ -2244,30 +2567,42 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
  
          for (j = 0; j < iterations; j++) {
              // keep track of the current status for stonewalling
@@ -16295,7 +16801,7 @@ index 624da51..0afa519 100644
  /* Parse a single line */
  int option_parse_key_value(char * key, char * value, options_all_t * opt_all);
 diff --git a/src/parse_options.c b/src/parse_options.c
-index 607d014..9168778 100755
+index 607d014..9d1f0f0 100755
 --- a/src/parse_options.c
 +++ b/src/parse_options.c
 @@ -32,9 +32,7 @@
@@ -16383,7 +16889,7 @@ index 607d014..9168778 100755
          } else if (strcasecmp(option, "deadlineforstonewalling") == 0) {
                  params->deadlineForStonewalling = atoi(value);
          } else if (strcasecmp(option, "stoneWallingWearOut") == 0) {
-@@ -191,42 +206,24 @@ void DecodeDirective(char *line, IOR_param_t *params, options_all_t * module_opt
+@@ -191,42 +206,26 @@ void DecodeDirective(char *line, IOR_param_t *params, options_all_t * module_opt
                  params->keepFileWithError = atoi(value);
          } else if (strcasecmp(option, "multiFile") == 0) {
                  params->multiFile = atoi(value);
@@ -16409,10 +16915,10 @@ index 607d014..9168778 100755
 -                params->noFill = atoi(value);
          } else if (strcasecmp(option, "verbose") == 0) {
                  params->verbose = atoi(value);
-         } else if (strcasecmp(option, "settimestampsignature") == 0) {
-                 params->setTimeStampSignature = atoi(value);
--        } else if (strcasecmp(option, "collective") == 0) {
--                params->collective = atoi(value);
+-        } else if (strcasecmp(option, "settimestampsignature") == 0) {
+-                params->setTimeStampSignature = atoi(value);
+         } else if (strcasecmp(option, "collective") == 0) {
+                 params->collective = atoi(value);
 -        } else if (strcasecmp(option, "preallocate") == 0) {
 -                params->preallocate = atoi(value);
 -        } else if (strcasecmp(option, "storefileoffset") == 0) {
@@ -16425,12 +16931,14 @@ index 607d014..9168778 100755
 -                params->useStridedDatatype = atoi(value);
 -        } else if (strcasecmp(option, "showhints") == 0) {
 -                params->showHints = atoi(value);
++        } else if (strcasecmp(option, "settimestampsignature") == 0) {
++                params->setTimeStampSignature = atoi(value);
 +        } else if (strcasecmp(option, "dataPacketType") == 0) {
 +                params->dataPacketType = parsePacketType(value[0]);
          } else if (strcasecmp(option, "uniqueDir") == 0) {
                  params->uniqueDir = atoi(value);
          } else if (strcasecmp(option, "useexistingtestfile") == 0) {
-@@ -243,53 +240,6 @@ void DecodeDirective(char *line, IOR_param_t *params, options_all_t * module_opt
+@@ -243,53 +242,6 @@ void DecodeDirective(char *line, IOR_param_t *params, options_all_t * module_opt
          } else if (strcasecmp(option, "memoryPerNode") == 0) {
                  params->memoryPerNode = NodeMemoryStringToBytes(value);
                  params->memoryPerTask = 0;
@@ -16484,7 +16992,7 @@ index 607d014..9168778 100755
          } else if (strcasecmp(option, "summaryalways") == 0) {
                  params->summary_every_test = atoi(value);
          } else {
-@@ -363,7 +313,7 @@ int contains_only(char *haystack, char *needle)
+@@ -363,7 +315,7 @@ int contains_only(char *haystack, char *needle)
          /* check for "needle" */
          if (strncasecmp(ptr, needle, strlen(needle)) != 0)
                  return 0;
@@ -16493,7 +17001,7 @@ index 607d014..9168778 100755
          for (ptr += strlen(needle); ptr < end; ptr++) {
                  if (!isspace(*ptr))
                          return 0;
-@@ -465,20 +415,27 @@ option_help * createGlobalOptions(IOR_param_t * params){
+@@ -465,20 +417,27 @@ option_help * createGlobalOptions(IOR_param_t * params){
    char APIs[1024];
    char APIs_legacy[1024];
    aiori_supported_apis(APIs, APIs_legacy, IOR);
@@ -16524,7 +17032,7 @@ index 607d014..9168778 100755
      {'e', NULL,        "fsync -- perform a fsync() operation at the end of each read/write phase", OPTION_FLAG, 'd', & params->fsync},
      {'E', NULL,        "useExistingTestFile -- do not remove test file before write access", OPTION_FLAG, 'd', & params->useExistingTestFile},
      {'f', NULL,        "scriptFile -- test script name", OPTION_OPTIONAL_ARGUMENT, 's', & params->testscripts},
-@@ -489,43 +446,38 @@ option_help * createGlobalOptions(IOR_param_t * params){
+@@ -489,43 +448,38 @@ option_help * createGlobalOptions(IOR_param_t * params){
       * after all the arguments are in and we know which it keep.
       */
      {'G', NULL,        "setTimeStampSignature -- set value for time stamp signature/random seed", OPTION_OPTIONAL_ARGUMENT, 'd', & params->setTimeStampSignature},
@@ -16536,7 +17044,7 @@ index 607d014..9168778 100755
      {'k', NULL,        "keepFile -- don't remove the test file(s) on program exit", OPTION_FLAG, 'd', & params->keepFile},
      {'K', NULL,        "keepFileWithError  -- keep error-filled file(s) after data-checking", OPTION_FLAG, 'd', & params->keepFileWithError},
 -    {'l', NULL,        "datapacket type-- type of packet that will be created [offset|incompressible|timestamp|o|i|t]", OPTION_OPTIONAL_ARGUMENT, 's', &  params->buffer_type},
-+    {'l', "dataPacketType",        "datapacket type-- type of packet that will be created [offset|incompressible|timestamp|o|i|t]", OPTION_OPTIONAL_ARGUMENT, 's', &  params->buffer_type},
++    {'l', "dataPacketType",        "datapacket type-- type of packet that will be created [offset|incompressible|timestamp|random|o|i|t|r]", OPTION_OPTIONAL_ARGUMENT, 's', &  params->buffer_type},
      {'m', NULL,        "multiFile -- use number of reps (-i) for multiple file count", OPTION_FLAG, 'd', & params->multiFile},
      {'M', NULL,        "memoryPerNode -- hog memory on the node  (e.g.: 2g, 75%)", OPTION_OPTIONAL_ARGUMENT, 's', & params->memoryPerNodeStr},
 -    {'n', NULL,        "noFill -- no fill in HDF5 file creation", OPTION_FLAG, 'd', & params->noFill},
@@ -16575,7 +17083,7 @@ index 607d014..9168778 100755
      {0, "dryRun",      "do not perform any I/Os just run evtl. inputs print dummy output", OPTION_FLAG, 'd', & params->dryRun},
      LAST_OPTION,
    };
-@@ -538,9 +490,9 @@ option_help * createGlobalOptions(IOR_param_t * params){
+@@ -538,9 +492,9 @@ option_help * createGlobalOptions(IOR_param_t * params){
  /*
   * Parse Commandline.
   */
@@ -16636,7 +17144,7 @@ index 5bb4b2b..3b31066 100644
    return 0;
  }
 diff --git a/src/utilities.c b/src/utilities.c
-index bcb1e03..c2ec6c9 100755
+index bcb1e03..e551d61 100755
 --- a/src/utilities.c
 +++ b/src/utilities.c
 @@ -16,6 +16,12 @@
@@ -16663,44 +17171,102 @@ index bcb1e03..c2ec6c9 100755
  #ifndef _WIN32
  #  include <regex.h>
  #  ifdef __sun                    /* SunOS does not support statfs(), instead uses statvfs() */
-@@ -47,6 +57,7 @@
+@@ -47,6 +57,9 @@
  #include "utilities.h"
  #include "aiori.h"
  #include "ior.h"
 +#include "ior-internal.h"
++
++#define RANDALGO_GOLDEN_RATIO_PRIME        0x9e37fffffffc0001UL
  
  /************************** D E C L A R A T I O N S ***************************/
  
-@@ -58,13 +69,87 @@ int      rank = 0;
+@@ -57,14 +70,147 @@ extern int numTasks;
+ int      rank = 0;
  int      rankOffset = 0;
  int      verbose = VERBOSE_0;        /* verbose output */
- MPI_Comm testComm;
+-MPI_Comm testComm;
 -MPI_Comm mpi_comm_world;
 -FILE * out_logfile;
 -FILE * out_resultfile;
++MPI_Comm testComm = MPI_COMM_NULL;
 +FILE * out_logfile = NULL;
 +FILE * out_resultfile = NULL;
  enum OutputFormat_t outputFormat;
  
++/* local */
++int rand_state_init = 0;
++uint64_t rand_state = 0;
++
  /***************************** F U N C T I O N S ******************************/
  
++/**
++ * Modifies a buffer for a write.  Performance sensitive because it is called
++ * before each write.
++ *
++ * @param buf pointer to byte buffer to fill
++ * @param bytes number of bytes to produce to fill buffer
++ * @param rand_seed seed to use for PRNG
++ * @param pretendRank unique identifier for this process
++ * @param dataPacketType identifier to designate pattern to fill buffer
++ */
 +void update_write_memory_pattern(uint64_t item, char * buf, size_t bytes, int rand_seed, int pretendRank, ior_dataPacketType_e dataPacketType){
-+  if(dataPacketType == DATA_TIMESTAMP || bytes < 8) return;
-+  int k=1;
++  if (dataPacketType == DATA_TIMESTAMP || bytes < 8)
++    return;
++
++  size_t size = bytes / sizeof(uint64_t);
 +  uint64_t * buffi = (uint64_t*) buf;
-+  for(size_t i=0; i < bytes/sizeof(uint64_t); i+=512, k++){
++
++  if (dataPacketType == DATA_RANDOM) {
++      uint64_t rand_state_local = rand_state;
++      if (!rand_state_init) {
++          unsigned seed = rand_seed + pretendRank;
++          rand_state_init = 1;
++          rand_state_local = rand_r(&seed);
++      }
++      for (size_t i = 0; i < size; i++) {
++          rand_state_local *= RANDALGO_GOLDEN_RATIO_PRIME;
++          rand_state_local >>= 3;
++          buffi[i] = rand_state_local;
++      }
++      rand_state = rand_state_local;
++      return;
++  }
++
++  /* DATA_INCOMPRESSIBLE and DATA_OFFSET */
++  int k = 1;
++  for(size_t i=0; i < size; i+=512, k++){
 +    buffi[i] = ((uint32_t) item * k) | ((uint64_t) pretendRank) << 32;
 +  }
 +}
 +
++/**
++ * Fills a buffer with bytes of a given pattern.  Not performance-sensitive
++ * because it is called once per test.
++ *
++ * @param buf pointer to byte buffer to fill
++ * @param bytes number of bytes to produce to fill buffer
++ * @param rand_seed seed to use for PRNG
++ * @param pretendRank unique identifier for this process
++ * @param dataPacketType identifier to designate pattern to fill buffer
++ */
 +void generate_memory_pattern(char * buf, size_t bytes, int rand_seed, int pretendRank, ior_dataPacketType_e dataPacketType){
 +  uint64_t * buffi = (uint64_t*) buf;
 +  // first half of 64 bits use the rank
 +  const size_t size = bytes / 8;
 +  // the first 8 bytes of each 4k block are updated at runtime
 +  unsigned seed = rand_seed + pretendRank;
++  if (dataPacketType == DATA_RANDOM && !rand_state_init) {
++      rand_state_init = 1;
++      rand_state = rand_r(&seed);
++  }
 +  for(size_t i=0; i < size; i++){
 +    switch(dataPacketType){
++      case(DATA_RANDOM):
++        rand_state *= RANDALGO_GOLDEN_RATIO_PRIME;
++        rand_state >>= 3;
++        buffi[i] = rand_state;
++        break;
 +      case(DATA_INCOMPRESSIBLE):{
 +        uint64_t hi = ((uint64_t) rand_r(& seed) << 32);
 +        uint64_t lo = (uint64_t) rand_r(& seed);
@@ -16732,6 +17298,11 @@ index bcb1e03..c2ec6c9 100755
 +    uint64_t exp;
 +        
 +    switch(dataPacketType){
++      case(DATA_RANDOM):
++        rand_state *= RANDALGO_GOLDEN_RATIO_PRIME;
++        rand_state >>= 3;
++        buffi[i] = rand_state;
++        break;
 +      case(DATA_INCOMPRESSIBLE):{
 +        uint64_t hi = ((uint64_t) rand_r(& seed) << 32);
 +        uint64_t lo = (uint64_t) rand_r(& seed);
@@ -16762,7 +17333,7 @@ index bcb1e03..c2ec6c9 100755
  void* safeMalloc(uint64_t size){
    void * d = malloc(size);
    if (d == NULL){
-@@ -80,8 +165,8 @@ void FailMessage(int rank, const char *location, char *format, ...) {
+@@ -80,8 +226,8 @@ void FailMessage(int rank, const char *location, char *format, ...) {
      va_start(args, format);
      vsnprintf(msg, 4096, format, args);
      va_end(args);
@@ -16773,7 +17344,7 @@ index bcb1e03..c2ec6c9 100755
      fflush(out_logfile);
      MPI_Abort(testComm, 1);
  }
-@@ -118,35 +203,35 @@ size_t NodeMemoryStringToBytes(char *size_str)
+@@ -118,35 +264,37 @@ size_t NodeMemoryStringToBytes(char *size_str)
          return mem / 100 * percent;
  }
  
@@ -16786,6 +17357,8 @@ index bcb1e03..c2ec6c9 100755
 +            return DATA_TIMESTAMP;
 +    case 'o': /* offset packet */
 +            return DATA_OFFSET;
++    case 'r': /* randomized blocks */
++            return DATA_RANDOM;
 +    default:
 +      ERRF("Unknown packet type \"%c\"; generic assumed\n", t);
 +      return DATA_OFFSET;
@@ -16826,7 +17399,7 @@ index bcb1e03..c2ec6c9 100755
  
      options->backend = backend;
      /* copy the actual module options into the test */
-@@ -157,7 +242,7 @@ void updateParsedOptions(IOR_param_t * options, options_all_t * global_options){
+@@ -157,7 +305,7 @@ void updateParsedOptions(IOR_param_t * options, options_all_t * global_options){
  /* Used in aiori-POSIX.c and aiori-PLFS.c
   */
  
@@ -16835,7 +17408,7 @@ index bcb1e03..c2ec6c9 100755
  {
  /* note that TRU64 needs O_DIRECTIO, SunOS uses directio(),
     and everyone else needs O_DIRECT */
-@@ -170,7 +255,7 @@ void set_o_direct_flag(int *fd)
+@@ -170,7 +318,7 @@ void set_o_direct_flag(int *fd)
  #  endif                          /* not O_DIRECTIO */
  #endif                            /* not O_DIRECT */
  
@@ -16844,7 +17417,7 @@ index bcb1e03..c2ec6c9 100755
  }
  
  
-@@ -565,91 +650,64 @@ IOR_offset_t StringToBytes(char *size_str)
+@@ -565,91 +713,64 @@ IOR_offset_t StringToBytes(char *size_str)
  /*
   * Displays size of file system and percent of data blocks and inodes used.
   */
@@ -16991,7 +17564,7 @@ index bcb1e03..c2ec6c9 100755
  }
  
  /*
-@@ -672,27 +730,6 @@ int Regex(char *string, char *pattern)
+@@ -672,27 +793,6 @@ int Regex(char *string, char *pattern)
          return (retValue);
  }
  
@@ -17019,7 +17592,7 @@ index bcb1e03..c2ec6c9 100755
  /*
   * System info for Windows.
   */
-@@ -715,10 +752,6 @@ int uname(struct utsname *name)
+@@ -715,10 +815,6 @@ int uname(struct utsname *name)
  }
  #endif /* _WIN32 */
  
@@ -17030,7 +17603,7 @@ index bcb1e03..c2ec6c9 100755
  /*
   * Get time stamp.  Use MPI_Timer() unless _NO_MPI_TIMER is defined,
   * in which case use gettimeofday().
-@@ -726,55 +759,46 @@ double wall_clock_delta = 0;
+@@ -726,55 +822,46 @@ double wall_clock_delta = 0;
  double GetTimeStamp(void)
  {
          double timeVal;
@@ -17095,7 +17668,7 @@ index bcb1e03..c2ec6c9 100755
  }
  
  char * PrintTimestamp() {
-@@ -792,16 +816,16 @@ char * PrintTimestamp() {
+@@ -792,16 +879,16 @@ char * PrintTimestamp() {
      return datestring;
  }
  
@@ -17115,7 +17688,7 @@ index bcb1e03..c2ec6c9 100755
        return data;
      }
      int ret = fscanf(out, "%lld", & data);
-@@ -809,7 +833,7 @@ int64_t ReadStoneWallingIterations(char * const filename){
+@@ -809,7 +896,7 @@ int64_t ReadStoneWallingIterations(char * const filename){
        return -1;
      }
      fclose(out);
@@ -17124,7 +17697,7 @@ index bcb1e03..c2ec6c9 100755
      return data;
    }
  }
-@@ -892,3 +916,99 @@ char *HumanReadable(IOR_offset_t value, int base)
+@@ -892,3 +979,99 @@ char *HumanReadable(IOR_offset_t value, int base)
          }
          return valueStr;
  }

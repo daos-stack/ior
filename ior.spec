@@ -8,7 +8,7 @@
 
 Name:		ior
 Version:	3.3.0
-Release:	14%{?commit:.g%{shortcommit}}%{?dist}
+Release:	15%{?commit:.g%{shortcommit}}%{?dist}
 
 Summary:	IOR-HPC
 
@@ -25,8 +25,6 @@ BuildRequires: libevent-devel
 BuildRequires: unzip
 BuildRequires: autoconf, automake
 BuildRequires: daos-devel
-# temporary hack until daos-devel Requires: libuuid-devel (again, as it should have always done)
-BuildRequires: libuuid-devel
 BuildRequires: hdf5-mpich-devel%{?_isa}
 %if (0%{?suse_version} >= 1500)
 BuildRequires: lua-lmod
@@ -91,6 +89,9 @@ EOF
 
 
 %changelog
+* Mon Nov 08 2021 Brian J. Murrell <brian.murrell@intel.com> - 3.3.0-15
+- Update to eca135ce939e24c17a3a4a4b490c741bead43363
+
 * Wed May 12 2021 Brian J. Murrell <brian.murrell@intel.com> - 3.3.0-14
 - Build on EL8
 - Temporarily add BR: libuuid-devel until daos-devel is fixed to R: it
