@@ -44,8 +44,13 @@ EL_7_PR_REPOS            ?= $(shell git show -s --format=%B | sed -ne 's/^PR-rep
 EL_8_PR_REPOS            ?= $(shell git show -s --format=%B | sed -ne 's/^PR-repos-el8: *\(.*\)/\1/p')
 UBUNTU_20_04_PR_REPOS    ?= $(shell git show -s --format=%B | sed -ne 's/^PR-repos-ubuntu20: *\(.*\)/\1/p')
 
-ifneq ($(GIT_COMMIT),)
-BUILD_DEFINES     := --define "commit $(GIT_COMMIT)"
+ifneq ($(PKG_GIT_COMMIT),)
+ifeq ($(GITHUB_PROJECT),)
+ifeq ($(GIT_PROJECT),)
+$(error You must set either GITHUB_PROJECT or GIT_PROJECT if you set PKG_GIT_COMMIT)
+endif
+endif
+BUILD_DEFINES     := --define "commit $(PKG_GIT_COMMIT)"
 RPM_BUILD_OPTIONS := $(BUILD_DEFINES)
 GIT_DIFF_EXCLUDES := $(PATCH_EXCLUDE_FILES:%=':!%')
 endif
@@ -63,7 +68,7 @@ DEB_BUILD        := $(DEB_TOP)/$(NAME)-$(VERSION)
 DEB_TARBASE      := $(DEB_TOP)/$(DEB_NAME)_$(VERSION)
 SOURCE           ?= $(eval SOURCE := $(shell CHROOT_NAME=$(CHROOT_NAME) $(SPECTOOL) $(COMMON_RPM_ARGS) -S -l $(SPEC) | sed -e 2,\$$d -e 's/\#/\\\#/g' -e 's/.*:  *//'))$(SOURCE)
 PATCHES          ?= $(eval PATCHES := $(shell CHROOT_NAME=$(CHROOT_NAME) $(SPECTOOL) $(COMMON_RPM_ARGS) -l $(SPEC) | sed -ne 1d -e 's/.*:  *//' -e 's/.*\///' -e '/\.patch/p'))$(PATCHES)
-OTHER_SOURCES    := $(eval OTHER_SOURCES := $(shell set -x; CHROOT_NAME=$(CHROOT_NAME) $(SPECTOOL) $(COMMON_RPM_ARGS) -l $(SPEC) | sed -ne 1d -e 's/.*:  *//' -e 's/.*\///' -e '/\.patch/d' -e p))$(OTHER_SOURCES)
+OTHER_SOURCES    := $(eval OTHER_SOURCES := $(shell CHROOT_NAME=$(CHROOT_NAME) $(SPECTOOL) $(COMMON_RPM_ARGS) -l $(SPEC) | sed -ne 1d -e 's/.*:  *//' -e 's/.*\///' -e '/\.patch/d' -e p))$(OTHER_SOURCES)
 SOURCES          := $(addprefix _topdir/SOURCES/,$(notdir $(SOURCE)) $(PATCHES) $(OTHER_SOURCES))
 ifeq ($(ID_LIKE),debian)
 DEBS             := $(addsuffix _$(VERSION)-1_amd64.deb,$(shell sed -n '/-udeb/b; s,^Package:[[:blank:]],$(DEB_TOP)/,p' $(TOPDIR)/debian/control))
@@ -297,27 +302,31 @@ debs: $(DEBS)
 ls: $(TARGETS)
 	ls -ld $^
 
-ifneq ($(GIT_COMMIT),)
+ifneq ($(PKG_GIT_COMMIT),)
 # This not really intended to run in CI.  It's meant as a developer
 # convenience to generate the needed patch and add it to the repo to
 # be committed.
-$(VERSION)..$(GIT_COMMIT).patch:
+$(VERSION)..$(PKG_GIT_COMMIT).patch:
+ifneq ($(GITHUB_PROJECT),)
 	# it really sucks that GitHub's "compare" returns such dirty patches
-	#curl -O 'https://github.com/hpc/$(NAME)/compare/$@'
-	git clone https://github.com/hpc/$(NAME).git
-	set -x; pushd $(NAME) &&                                \
-	trap 'popd && rm -rf $(NAME)' EXIT;             \
-	echo git diff $(VERSION)..$(GIT_COMMIT) --stat --    \
-	    $(GIT_DIFF_EXCLUDES );                      \
-	git diff $(VERSION)..$(GIT_COMMIT) --           \
-	    $(GIT_DIFF_EXCLUDES) > ../$@;               \
-	popd;                                           \
-	trap 'rm -rf $(NAME)' EXIT;                     \
+	#curl -O 'https://github.com/$(GITHUB_PROJECT)/compare/$@'
+	git clone https://github.com/$(GITHUB_PROJECT).git
+else
+	git clone $(GIT_PROJECT)
+endif
+	set -x; pushd $(NAME) &&                              \
+	trap 'popd && rm -rf $(NAME)' EXIT;                   \
+	echo git diff $(VERSION)..$(PKG_GIT_COMMIT) --stat -- \
+	    $(GIT_DIFF_EXCLUDES );                            \
+	git diff $(VERSION)..$(PKG_GIT_COMMIT) --             \
+	    $(GIT_DIFF_EXCLUDES) > ../$@;                     \
+	popd;                                                 \
+	trap 'rm -rf $(NAME)' EXIT;                           \
 	git add $@
-patch: $(VERSION)..$(GIT_COMMIT).patch
+patch: $(VERSION)..$(PKG_GIT_COMMIT).patch
 else
 patch:
-	echo "GIT_COMMIT is not defined"
+	echo "PKG_GIT_COMMIT is not defined"
 endif
 
 # *_LOCAL_* repos are locally built packages.
