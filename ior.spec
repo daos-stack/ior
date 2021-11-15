@@ -8,7 +8,7 @@
 
 Name:		ior
 Version:	3.3.0
-Release:	15%{?commit:.g%{shortcommit}}%{?dist}
+Release:	16%{?commit:.g%{shortcommit}}%{?dist}
 
 Summary:	IOR-HPC
 
@@ -89,6 +89,9 @@ EOF
 
 
 %changelog
+* Fri Nov 12 2021 Wang Shilong <shilong.wang@intel.com> - 3.3.0-16
+- Rebuilt for breaking DAOS API change
+
 * Mon Nov 08 2021 Brian J. Murrell <brian.murrell@intel.com> - 3.3.0-15
 - Update to eca135ce939e24c17a3a4a4b490c741bead43363
 
