@@ -39,6 +39,12 @@ Provides: ior-hpc = %{version}-%{release}
 %description
 IOR-HPC
 
+%if (0%{?suse_version} > 0)
+%global __debug_package 1
+%global _debuginfo_subpackages 0
+%debug_package
+%endif
+
 %prep
 %autosetup -p1
 %if "%{?commit}" != ""
@@ -89,6 +95,9 @@ EOF
 
 
 %changelog
+* Fri Dec 17 2021 Phillip Henderson <phillip.henderson@intel.com> - 3.3.0-16
+- Enable building debuginfo package on SUSE platforms
+
 * Fri Nov 12 2021 Wang Shilong <shilong.wang@intel.com> - 3.3.0-16
 - Rebuilt for breaking DAOS API change
 
