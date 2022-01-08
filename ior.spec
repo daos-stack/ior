@@ -61,7 +61,6 @@ fi
 %module_load mpich
 echo $PATH
 set -x
-rm -rf %{buildroot}/usr/src
 %if (0%{?suse_version} >= 1)
 %configure --with-mpiio --with-daos=/usr --with-hdf5
 %else
