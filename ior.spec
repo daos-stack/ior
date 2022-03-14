@@ -8,7 +8,7 @@
 
 Name:		ior
 Version:	3.3.0
-Release:	17%{?commit:.g%{shortcommit}}%{?dist}
+Release:	18%{?commit:.g%{shortcommit}}%{?dist}
 
 Summary:	IOR-HPC
 
@@ -94,6 +94,9 @@ EOF
 
 
 %changelog
+* Mon Mar 14 2022 Mohamad Chaarawi <mohamad.chaarawi@intel.com> - 3.3.0-18
+- Update to build with HDF5 1.13.1
+
 * Fri Dec 17 2021 Phillip Henderson <phillip.henderson@intel.com> - 3.3.0-17
 - Enable building debuginfo package on SUSE platforms
 
