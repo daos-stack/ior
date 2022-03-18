@@ -8,7 +8,7 @@
 
 Name:		ior
 Version:	3.3.0
-Release:	18%{?commit:.g%{shortcommit}}%{?dist}
+Release:	19%{?commit:.g%{shortcommit}}%{?dist}
 
 Summary:	IOR-HPC
 
@@ -94,6 +94,9 @@ EOF
 
 
 %changelog
+* Fri Mar 18 2022 Brian J. Murrell <brian.murrell@intel.com> - 3.3.0-19
+- Update to d3574d536643475269d37211e283b49ebd6732d7
+
 * Mon Mar 14 2022 Mohamad Chaarawi <mohamad.chaarawi@intel.com> - 3.3.0-18
 - Update to build with HDF5 1.13.1
 
