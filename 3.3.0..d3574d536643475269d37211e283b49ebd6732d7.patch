@@ -86,10 +86,14 @@ index c1c73a8..081752b 100755
 -[official IOR/mdtest documention]: http://ior.readthedocs.org/
 +[official IOR/mdtest documentation]: http://ior.readthedocs.org/
 diff --git a/configure.ac b/configure.ac
-index b34f819..7f64855 100755
+index b34f819..6cd1d7b 100755
 --- a/configure.ac
 +++ b/configure.ac
-@@ -73,6 +73,53 @@ AS_IF([test "$ac_cv_header_gpfs_h" = "yes" -o "$ac_cv_header_gpfs_fcntl_h" = "ye
+@@ -70,9 +70,57 @@ AS_IF([test "$ac_cv_header_gpfs_h" = "yes" -o "$ac_cv_header_gpfs_fcntl_h" = "ye
+         AC_SEARCH_LIBS([gpfs_fcntl], [gpfs], [],
+         [AC_MSG_ERROR([Library containing gpfs_fcntl symbols not found])
+         ])
++        AC_CHECK_TYPES([gpfsFineGrainWriteSharing_t], [], [], [[#include <gpfs_fcntl.h>]])
      ])
  ])
  
@@ -143,16 +147,17 @@ index b34f819..7f64855 100755
  # Check for system capabilities
  AC_SYS_LARGEFILE
  
-@@ -84,7 +131,7 @@ AC_ARG_WITH([lustre],
+@@ -84,7 +132,8 @@ AC_ARG_WITH([lustre],
                  [support configurable Lustre striping values @<:@default=check@:>@])],
          [], [with_lustre=check])
  AS_IF([test "x$with_lustre" = xyes ], [
 -        AC_CHECK_HEADERS([linux/lustre/lustre_user.h lustre/lustre_user.h], break, [
-+        AC_CHECK_HEADERS([linux/lustre/lustre_user.h lustre/lustre_user.h], [AC_DEFINE([HAVE_LUSTRE_USER], [], [Lustre user API available in some shape or form])], [
++        AC_CHECK_HEADERS([linux/lustre/lustre_user.h lustre/lustre_user.h],
++                [AC_DEFINE([HAVE_LUSTRE_USER], [], [Lustre user API available in some shape or form])], [
                  if test "x$with_lustre" != xcheck -a \
                          "x$ac_cv_header_linux_lustre_lustre_user_h" = "xno" -a \
                          "x$ac_cv_header_lustre_lustre_user_h" = "xno" ; then
-@@ -160,8 +207,10 @@ AC_ARG_WITH([ncmpi],
+@@ -160,8 +209,10 @@ AC_ARG_WITH([ncmpi],
          [],
          [with_ncmpi=no])
  AM_CONDITIONAL([USE_NCMPI_AIORI], [test x$with_ncmpi = xyes])
@@ -165,7 +170,7 @@ index b34f819..7f64855 100755
  ])
  
  # MMAP IO support
-@@ -186,6 +235,34 @@ AM_COND_IF([USE_POSIX_AIORI],[
+@@ -186,6 +237,34 @@ AM_COND_IF([USE_POSIX_AIORI],[
          AC_DEFINE([USE_POSIX_AIORI], [], [Build POSIX backend AIORI])
  ])
  
@@ -200,7 +205,7 @@ index b34f819..7f64855 100755
  # RADOS support
  AC_ARG_WITH([rados],
          [AS_HELP_STRING([--with-rados],
-@@ -211,40 +288,25 @@ AM_COND_IF([USE_CEPHFS_AIORI],[
+@@ -211,40 +290,25 @@ AM_COND_IF([USE_CEPHFS_AIORI],[
          AC_DEFINE([USE_CEPHFS_AIORI], [], [Build CEPHFS backend AIORI])
  ])
  
@@ -247,7 +252,7 @@ index b34f819..7f64855 100755
  ])
  
  # Gfarm support
-@@ -293,19 +355,54 @@ AM_COND_IF([AWS4C_DIR],[
+@@ -293,19 +357,54 @@ AM_COND_IF([AWS4C_DIR],[
  ])
  
  
@@ -309,7 +314,7 @@ index b34f819..7f64855 100755
              AC_MSG_NOTICE([beginning of S3-related checks])
  
              # save user's values, while we use AC_CHECK_HEADERS with $AWS4C_DIR
-@@ -337,6 +434,30 @@ Consider --with-aws4c=, CPPFLAGS, LDFLAGS, etc])
+@@ -337,6 +436,30 @@ Consider --with-aws4c=, CPPFLAGS, LDFLAGS, etc])
              LDFLAGS=$ORIG_LDFLAGS
  ])
  
@@ -341,7 +346,7 @@ index b34f819..7f64855 100755
  # Enable building "IOR", in all capitals
  AC_ARG_ENABLE([caps],
 diff --git a/doc/USER_GUIDE b/doc/USER_GUIDE
-index 3d6b4e4..c68aeca 100755
+index 3d6b4e4..02f90cc 100755
 --- a/doc/USER_GUIDE
 +++ b/doc/USER_GUIDE
 @@ -47,7 +47,7 @@ Two ways to run IOR:
@@ -353,6 +358,15 @@ index 3d6b4e4..c68aeca 100755
      For example, username and password for the storage.
      Available options are listed in the help text after selecting the API when running with -h.
      For example, 'IOR -a DUMMY -h' shows the supported options for the DUMMY backend.
+@@ -89,7 +89,7 @@ These options are to be used on the command line. E.g., 'IOR -a POSIX -b 4K'.
+   -n    noFill -- no fill in HDF5 file creation
+   -N N  numTasks -- number of tasks that should participate in the test
+   -o S  testFile -- full name for test
+-  -O S  string of IOR directives (e.g. -O checkRead=1,lustreStripeCount=32)
++  -O S  string of IOR directives (e.g. -O checkRead=1,GPUid=2)
+   -p    preallocate -- preallocate file size
+   -P    useSharedFilePointer -- use shared file pointer [not working]
+   -q    quitOnError -- during file error-checking, abort on error
 @@ -164,7 +164,7 @@ GENERAL:
  
    * numTasks             - number of tasks that should participate in the test
@@ -362,16 +376,75 @@ index 3d6b4e4..c68aeca 100755
  
    * interTestDelay       - this is the time in seconds to delay before
                             beginning a write or read in a series of tests [0]
-@@ -361,7 +361,7 @@ GPFS-SPECIFIC:
+@@ -347,28 +347,54 @@ MPIIO-, HDF5-, AND NCMPI-ONLY:
  
-   * gpfsReleaseToken     - immediately after opening or creating file, release
- 			   all locks.  Might help mitigate lock-revocation
--			   traffic when many proceses write/read to same file.
-+			   traffic when many processes write/read to same file.
- 
- BeeGFS-SPECIFIC (POSIX only):
+ LUSTRE-SPECIFIC:
  ================
-@@ -499,7 +499,7 @@ zip, gzip, and bzip.
+-  * lustreStripeCount    - set the lustre stripe count for the test file(s) [0]
++  * POSIX-ONLY:
++    * --posix.lustre.stripecount  - set the Lustre stripe count for the test file(s) [0]
+ 
+-  * lustreStripeSize     - set the lustre stripe size for the test file(s) [0]
++    * --posix.lustre.stripesize   - set the Lustre stripe size for the test file(s) [0]
+ 
+-  * lustreStartOST       - set the starting OST for the test file(s) [-1]
++    * --posix.lustre.startost     - set the starting OST for the test file(s) [-1]
+ 
+-  * lustreIgnoreLocks    - disable lustre range locking [0]
++    * --posix.lustre.ignorelocks - disable Lustre range locking [0]
+ 
+-GPFS-SPECIFIC:
++  * MPIIO-, HDF5-, AND NCMPI-ONLY:
++    * ROMIO-based IO (see https://github.com/pmodels/mpich/blob/048879f1234419abb035aacbaf655880c8f77dba/src/mpi/romio/adio/ad_lustre/ad_lustre_open.c#L58):
++      * requires setting the environment variable ROMIO_FSTYPE_FORCE=LUSTRE: (or similar for specific MPIs) to enable ROMIO's Lustre ADIO
++
++      * IOR_HINT__MPI__striping_factor - set the Lustre stripe count for the test file(s) [-1]
++
++      * IOR_HINT__MPI__striping_unit - set the Lustre stripe size for the test file(s) [0]
++
++      * IOR_HINT__MPI__romio_lustre_start_iodevice - set the starting OST for the test file(s) [-1]
++
++    * OMPIO-based IO (see https://github.com/open-mpi/ompi/blob/6d237e85d730ed946c9f45fcd3e19b78a243203e/ompi/mca/fs/lustre/fs_lustre_component.c#L75)
++      * not setting either of the environment variables below causes a fatal "Floating point exception: Integer divide-by-zero" error
++
++      * execution with either of the environment variables causes this message "ior: setstripe error for 'testfile': stripe already set" which can safely be ignored as OMPIO tries to modify the stripe settings twice although the first time succeeds
++
++      * OMPI_MCA_fs_lustre_stripe_width / IOR_HINT__MPI__stripe_width - set the Lustre stripe count for the test file(s) [0]
++
++      * OMPI_MCA_fs_lustre_stripe_size / IOR_HINT__MPI__stripe_size - set the Lustre stripe size for the test file(s) [0]
++
++GPFS-SPECIFIC (POSIX-ONLY):
+ ================
+-  * gpfsHintAccess       - use gpfs_fcntl hints to pre-declare accesses
++  * --posix.gpfs.hintaccess               - use gpfs_fcntl hints to pre-declare accesses
++
++  * --posix.gpfs.releasetoken             - immediately after opening or creating file, release
++                                            all locks.  Might help mitigate lock-revocation
++                                            traffic when many processes write/read to same file.
++
++  * --posix.gpfs.finegrainwritesharing    - This hint optimizes the performance of small strided
++                                            writes to a shared file from a parallel application
+ 
+-  * gpfsReleaseToken     - immediately after opening or creating file, release
+-			   all locks.  Might help mitigate lock-revocation
+-			   traffic when many proceses write/read to same file.
++  * --posix.gpfs.finegrainreadsharing     - This hint optimizes the performance of small strided
++                                            reads from a shared file from a parallel application
+ 
+-BeeGFS-SPECIFIC (POSIX only):
++BeeGFS-SPECIFIC (POSIX-ONLY):
+ ================
+-  * beegfsNumTargets     - set the number of storage targets to use
++  * --posix.beegfs.NumTargets     - set the number of storage targets to use
+ 
+-  * beegfsChunkSize      - set the striping chunk size. Must be a power of two,
+-                             and greater than 64kiB, (e.g.: 256k, 1M, ...)
++  * --posix.beegfs.ChunkSize      - set the striping chunk size. Must be a power of two,
++                                    and greater than 64kiB, (e.g.: 256k, 1M, ...)
+ 
+ 
+ ***********************
+@@ -499,7 +525,7 @@ zip, gzip, and bzip.
  
  3) bzip2: For bziped files a transfer size of 1k is insufficient (~50% compressed).
     To avoid compression a transfer size of greater than the bzip block size is required
@@ -380,7 +453,7 @@ index 3d6b4e4..c68aeca 100755
  
  Be aware of the block size your compression algorithm will look at, and adjust the transfer size
  accordingly.
-@@ -660,7 +660,7 @@ HOW DO I USE HINTS?
+@@ -660,7 +686,7 @@ HOW DO I USE HINTS?
      'setenv IOR_HINT__MPI__<hint> <value>'
  
  
@@ -560,6 +633,354 @@ index 3786560..037433c 100755
 +build.conf:
 +	@echo LDFLAGS=$(LDFLAGS) $(extraLDFLAGS) $(extraLDADD) $(LIBS) > build.conf
 +	@echo CFLAGS=$(CFLAGS) $(extraCPPFLAGS) >> build.conf
+diff --git a/src/aiori-CEPHFS.c b/src/aiori-CEPHFS.c
+index 27f12db..23cc56d 100755
+--- a/src/aiori-CEPHFS.c
++++ b/src/aiori-CEPHFS.c
+@@ -18,6 +18,7 @@
+ # include "config.h"
+ #endif
+ 
++#include <errno.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <sys/stat.h>
+@@ -43,18 +44,24 @@ struct cephfs_options{
+   char * user;
+   char * conf;
+   char * prefix;
++  char * remote_prefix;
++  int olazy;
+ };
+ 
+ static struct cephfs_options o = {
+   .user = NULL,
+   .conf = NULL,
+   .prefix = NULL,
++  .remote_prefix = NULL,
++  .olazy = 0,
+ };
+ 
+ static option_help options [] = {
+-      {0, "cephfs.user", "Username for the ceph cluster", OPTION_REQUIRED_ARGUMENT, 's', & o.user},
+-      {0, "cephfs.conf", "Config file for the ceph cluster", OPTION_REQUIRED_ARGUMENT, 's', & o.conf},
+-      {0, "cephfs.prefix", "mount prefix", OPTION_OPTIONAL_ARGUMENT, 's', & o.prefix},
++      {0, "cephfs.user", "Username for the ceph cluster", OPTION_OPTIONAL_ARGUMENT, 's', & o.user},
++      {0, "cephfs.conf", "Config file for the ceph cluster", OPTION_OPTIONAL_ARGUMENT, 's', & o.conf},
++      {0, "cephfs.prefix", "Mount prefix", OPTION_OPTIONAL_ARGUMENT, 's', & o.prefix},
++      {0, "cephfs.remote_prefix", "Remote mount prefix", OPTION_OPTIONAL_ARGUMENT, 's', & o.remote_prefix},
++      {0, "cephfs.olazy", "Enable Lazy I/O", OPTION_FLAG, 'd', & o.olazy},
+       LAST_OPTION
+ };
+ 
+@@ -63,22 +70,25 @@ static struct ceph_mount_info *cmount;
+ /**************************** P R O T O T Y P E S *****************************/
+ static void CEPHFS_Init();
+ static void CEPHFS_Final();
+-static void *CEPHFS_Create(char *, IOR_param_t *);
+-static void *CEPHFS_Open(char *, IOR_param_t *);
+-static IOR_offset_t CEPHFS_Xfer(int, void *, IOR_size_t *,
+-                           IOR_offset_t, IOR_param_t *);
+-static void CEPHFS_Close(void *, IOR_param_t *);
+-static void CEPHFS_Delete(char *, IOR_param_t *);
+-static void CEPHFS_Fsync(void *, IOR_param_t *);
+-static IOR_offset_t CEPHFS_GetFileSize(IOR_param_t *, MPI_Comm, char *);
+-static int CEPHFS_StatFS(const char *, ior_aiori_statfs_t *, IOR_param_t *);
+-static int CEPHFS_MkDir(const char *, mode_t, IOR_param_t *);
+-static int CEPHFS_RmDir(const char *, IOR_param_t *);
+-static int CEPHFS_Access(const char *, int, IOR_param_t *);
+-static int CEPHFS_Stat(const char *, struct stat *, IOR_param_t *);
+-static void CEPHFS_Sync(IOR_param_t *);
++void CEPHFS_xfer_hints(aiori_xfer_hint_t * params);
++static aiori_fd_t *CEPHFS_Create(char *path, int flags, aiori_mod_opt_t *options);
++static aiori_fd_t *CEPHFS_Open(char *path, int flags, aiori_mod_opt_t *options);
++static IOR_offset_t CEPHFS_Xfer(int access, aiori_fd_t *file, IOR_size_t *buffer,
++                           IOR_offset_t length, IOR_offset_t offset, aiori_mod_opt_t *options);
++static void CEPHFS_Close(aiori_fd_t *, aiori_mod_opt_t *);
++static void CEPHFS_Delete(char *path, aiori_mod_opt_t *);
++static void CEPHFS_Fsync(aiori_fd_t *, aiori_mod_opt_t *);
++static IOR_offset_t CEPHFS_GetFileSize(aiori_mod_opt_t *, char *);
++static int CEPHFS_StatFS(const char *path, ior_aiori_statfs_t *stat, aiori_mod_opt_t *options);
++static int CEPHFS_MkDir(const char *path, mode_t mode, aiori_mod_opt_t *options);
++static int CEPHFS_RmDir(const char *path, aiori_mod_opt_t *options);
++static int CEPHFS_Access(const char *path, int mode, aiori_mod_opt_t *options);
++static int CEPHFS_Stat(const char *path, struct stat *buf, aiori_mod_opt_t *options);
++static void CEPHFS_Sync(aiori_mod_opt_t *);
+ static option_help * CEPHFS_options();
+ 
++static aiori_xfer_hint_t * hints = NULL;
++
+ /************************** D E C L A R A T I O N S ***************************/
+ ior_aiori_t cephfs_aiori = {
+         .name = "CEPHFS",
+@@ -90,7 +100,9 @@ ior_aiori_t cephfs_aiori = {
+         .xfer = CEPHFS_Xfer,
+         .close = CEPHFS_Close,
+         .delete = CEPHFS_Delete,
++        .get_options = CEPHFS_options,
+         .get_version = aiori_get_version,
++        .xfer_hints = CEPHFS_xfer_hints,
+         .fsync = CEPHFS_Fsync,
+         .get_file_size = CEPHFS_GetFileSize,
+         .statfs = CEPHFS_StatFS,
+@@ -99,7 +111,6 @@ ior_aiori_t cephfs_aiori = {
+         .access = CEPHFS_Access,
+         .stat = CEPHFS_Stat,
+         .sync = CEPHFS_Sync,
+-        .get_options = CEPHFS_options,
+ };
+ 
+ #define CEPHFS_ERR(__err_str, __ret) do { \
+@@ -108,6 +119,12 @@ ior_aiori_t cephfs_aiori = {
+ } while(0)
+ 
+ /***************************** F U N C T I O N S ******************************/
++
++void CEPHFS_xfer_hints(aiori_xfer_hint_t * params)
++{
++  hints = params;
++}
++
+ static const char* pfix(const char* path) {
+         const char* npath = path;
+         const char* prefix = o.prefix;
+@@ -125,11 +142,16 @@ static option_help * CEPHFS_options(){
+ 
+ static void CEPHFS_Init()
+ {
++        char *remote_prefix = "/";
++
+         /* Short circuit if the options haven't been filled yet. */
+         if (!o.user || !o.conf || !o.prefix) {
+                 WARN("CEPHFS_Init() called before options have been populated!");
+                 return;
+         }
++        if (o.remote_prefix != NULL) {
++                remote_prefix = o.remote_prefix;
++        }
+ 
+         /* Short circuit if the mount handle already exists */ 
+         if (cmount) {
+@@ -150,7 +172,7 @@ static void CEPHFS_Init()
+         }
+ 
+         /* mount the handle */
+-        ret = ceph_mount(cmount, "/");
++        ret = ceph_mount(cmount, remote_prefix);
+         if (ret) {
+                 CEPHFS_ERR("unable to mount cephfs", ret);
+                 ceph_shutdown(cmount);
+@@ -184,55 +206,61 @@ static void CEPHFS_Final()
+ 	cmount = NULL;
+ }
+ 
+-static void *CEPHFS_Create(char *testFileName, IOR_param_t * param)
++static aiori_fd_t *CEPHFS_Create(char *path, int flags, aiori_mod_opt_t *options)
+ {
+-        return CEPHFS_Open(testFileName, param);
++        return CEPHFS_Open(path, flags | IOR_CREAT, options);
+ }
+ 
+-static void *CEPHFS_Open(char *testFileName, IOR_param_t * param)
++static aiori_fd_t *CEPHFS_Open(char *path, int flags, aiori_mod_opt_t *options)
+ {
+-        const char *file = pfix(testFileName);
++        const char *file = pfix(path);
+         int* fd;
+         fd = (int *)malloc(sizeof(int));
+ 
+         mode_t mode = 0664;
+-        int flags = (int) 0;
++        int ceph_flags = (int) 0;
+ 
+         /* set IOR file flags to CephFS flags */
+         /* -- file open flags -- */
+-        if (param->openFlags & IOR_RDONLY) {
+-                flags |= CEPH_O_RDONLY;
++        if (flags & IOR_RDONLY) {
++                ceph_flags |= CEPH_O_RDONLY;
+         }
+-        if (param->openFlags & IOR_WRONLY) {
+-                flags |= CEPH_O_WRONLY;
++        if (flags & IOR_WRONLY) {
++                ceph_flags |= CEPH_O_WRONLY;
+         }
+-        if (param->openFlags & IOR_RDWR) {
+-                flags |= CEPH_O_RDWR;
++        if (flags & IOR_RDWR) {
++                ceph_flags |= CEPH_O_RDWR;
+         }
+-        if (param->openFlags & IOR_APPEND) {
+-                fprintf(stdout, "File append not implemented in CephFS\n");
++        if (flags & IOR_APPEND) {
++                CEPHFS_ERR("File append not implemented in CephFS", EINVAL);
+         }
+-        if (param->openFlags & IOR_CREAT) {
+-                flags |= CEPH_O_CREAT;
++        if (flags & IOR_CREAT) {
++                ceph_flags |= CEPH_O_CREAT;
+         }
+-        if (param->openFlags & IOR_EXCL) {
+-                flags |= CEPH_O_EXCL;
++        if (flags & IOR_EXCL) {
++                ceph_flags |= CEPH_O_EXCL;
+         }
+-        if (param->openFlags & IOR_TRUNC) {
+-                flags |= CEPH_O_TRUNC;
++        if (flags & IOR_TRUNC) {
++                ceph_flags |= CEPH_O_TRUNC;
+         }
+-        if (param->openFlags & IOR_DIRECT) {
+-                fprintf(stdout, "O_DIRECT not implemented in CephFS\n");
++        if (flags & IOR_DIRECT) {
++                CEPHFS_ERR("O_DIRECT not implemented in CephFS", EINVAL);
+         }
+-        *fd = ceph_open(cmount, file, flags, mode);
++        *fd = ceph_open(cmount, file, ceph_flags, mode);
+         if (*fd < 0) {
+                 CEPHFS_ERR("ceph_open failed", *fd);
+         }
++        if (o.olazy == TRUE) {
++                int ret = ceph_lazyio(cmount, *fd, 1);
++                if (ret != 0) {
++                        WARN("Error enabling lazy mode");
++                }
++        }
+         return (void *) fd;
+ }
+ 
+-static IOR_offset_t CEPHFS_Xfer(int access, void *file, IOR_size_t * buffer,
+-                               IOR_offset_t length, IOR_param_t * param)
++static IOR_offset_t CEPHFS_Xfer(int access, aiori_fd_t *file, IOR_size_t *buffer,
++                           IOR_offset_t length, IOR_offset_t offset, aiori_mod_opt_t *options)
+ {
+         uint64_t size = (uint64_t) length;
+         char *buf = (char *) buffer;
+@@ -241,19 +269,19 @@ static IOR_offset_t CEPHFS_Xfer(int access, void *file, IOR_size_t * buffer,
+ 
+         if (access == WRITE)
+         {
+-                ret = ceph_write(cmount, fd, buf, size, param->offset);
++                ret = ceph_write(cmount, fd, buf, size, offset);
+                 if (ret < 0) {
+                         CEPHFS_ERR("unable to write file to CephFS", ret);
+                 } else if (ret < size) {
+                         CEPHFS_ERR("short write to CephFS", ret);
+                 }
+-                if (param->fsyncPerWrite == TRUE) {
+-                        CEPHFS_Fsync(&fd, param);
++                if (hints->fsyncPerWrite == TRUE) {
++                        CEPHFS_Fsync(file, options);
+                 }
+         }
+         else /* READ */
+         {
+-                ret = ceph_read(cmount, fd, buf, size, param->offset);
++                ret = ceph_read(cmount, fd, buf, size, offset);
+                 if (ret < 0) {
+                         CEPHFS_ERR("unable to read file from CephFS", ret);
+                 } else if (ret < size) {
+@@ -264,7 +292,7 @@ static IOR_offset_t CEPHFS_Xfer(int access, void *file, IOR_size_t * buffer,
+         return length;
+ }
+ 
+-static void CEPHFS_Fsync(void *file, IOR_param_t * param)
++static void CEPHFS_Fsync(aiori_fd_t *file, aiori_mod_opt_t *options)
+ {
+         int fd = *(int *) file;
+         int ret = ceph_fsync(cmount, fd, 0);
+@@ -273,7 +301,7 @@ static void CEPHFS_Fsync(void *file, IOR_param_t * param)
+         }
+ }
+ 
+-static void CEPHFS_Close(void *file, IOR_param_t * param)
++static void CEPHFS_Close(aiori_fd_t *file, aiori_mod_opt_t *options)
+ {
+         int fd = *(int *) file;
+         int ret = ceph_close(cmount, fd);
+@@ -284,28 +312,27 @@ static void CEPHFS_Close(void *file, IOR_param_t * param)
+         return;
+ }
+ 
+-static void CEPHFS_Delete(char *testFileName, IOR_param_t * param)
++static void CEPHFS_Delete(char *path, aiori_mod_opt_t *options)
+ {
+-        int ret = ceph_unlink(cmount, pfix(testFileName));
++        int ret = ceph_unlink(cmount, pfix(path));
+         if (ret < 0) {
+                 CEPHFS_ERR("ceph_unlink failed", ret);
+         }
+         return;
+ }
+ 
+-static IOR_offset_t CEPHFS_GetFileSize(IOR_param_t * param, MPI_Comm testComm,
+-                                      char *testFileName)
++static IOR_offset_t CEPHFS_GetFileSize(aiori_mod_opt_t *options, char *path)
+ {
+         struct stat stat_buf;
+         IOR_offset_t aggFileSizeFromStat, tmpMin, tmpMax, tmpSum;
+ 
+-        int ret = ceph_stat(cmount, pfix(testFileName), &stat_buf);
++        int ret = ceph_stat(cmount, pfix(path), &stat_buf);
+         if (ret < 0) {
+                 CEPHFS_ERR("ceph_stat failed", ret);
+         }
+         aggFileSizeFromStat = stat_buf.st_size;
+ 
+-        if (param->filePerProc == TRUE) {
++        if (hints->filePerProc == TRUE) {
+                 MPI_CHECK(MPI_Allreduce(&aggFileSizeFromStat, &tmpSum, 1,
+                                         MPI_LONG_LONG_INT, MPI_SUM, testComm),
+                           "cannot total data moved");
+@@ -327,11 +354,9 @@ static IOR_offset_t CEPHFS_GetFileSize(IOR_param_t * param, MPI_Comm testComm,
+         }
+ 
+         return (aggFileSizeFromStat);
+-
+ }
+ 
+-static int CEPHFS_StatFS(const char *path, ior_aiori_statfs_t *stat_buf,
+-                        IOR_param_t *param)
++static int CEPHFS_StatFS(const char *path, ior_aiori_statfs_t *stat_buf, aiori_mod_opt_t *options)
+ {
+ #if defined(HAVE_STATVFS)
+         struct statvfs statfs_buf;
+@@ -354,28 +379,28 @@ static int CEPHFS_StatFS(const char *path, ior_aiori_statfs_t *stat_buf,
+ #endif
+ }
+ 
+-static int CEPHFS_MkDir(const char *path, mode_t mode, IOR_param_t *param)
++static int CEPHFS_MkDir(const char *path, mode_t mode, aiori_mod_opt_t *options)
+ {
+         return ceph_mkdir(cmount, pfix(path), mode);
+ }
+ 
+-static int CEPHFS_RmDir(const char *path, IOR_param_t *param)
++static int CEPHFS_RmDir(const char *path, aiori_mod_opt_t *options)
+ {
+         return ceph_rmdir(cmount, pfix(path));
+ }
+ 
+-static int CEPHFS_Access(const char *testFileName, int mode, IOR_param_t *param)
++static int CEPHFS_Access(const char *path, int mode, aiori_mod_opt_t *options)
+ {
+         struct stat buf;
+-        return ceph_stat(cmount, pfix(testFileName), &buf);
++        return ceph_stat(cmount, pfix(path), &buf);
+ }
+ 
+-static int CEPHFS_Stat(const char *testFileName, struct stat *buf, IOR_param_t *param)
++static int CEPHFS_Stat(const char *path, struct stat *buf, aiori_mod_opt_t *options)
+ {
+-        return ceph_stat(cmount, pfix(testFileName), buf);
++        return ceph_stat(cmount, pfix(path), buf);
+ }
+ 
+-static void CEPHFS_Sync(IOR_param_t *param)
++static void CEPHFS_Sync(aiori_mod_opt_t *options)
+ {
+         int ret = ceph_sync_fs(cmount);
+         if (ret < 0) {
 diff --git a/src/aiori-DAOS.c b/src/aiori-DAOS.c
 deleted file mode 100644
 index 8fa1578..0000000
@@ -1109,7 +1530,7 @@ index 8fa1578..0000000
 -	return size;
 -}
 diff --git a/src/aiori-DFS.c b/src/aiori-DFS.c
-index e7b1d6b..e78f328 100755
+index e7b1d6b..23741e1 100755
 --- a/src/aiori-DFS.c
 +++ b/src/aiori-DFS.c
 @@ -27,22 +27,30 @@
@@ -1497,7 +1918,7 @@ index e7b1d6b..e78f328 100755
  
  out:
  	if (f1)
-@@ -346,285 +375,400 @@ out:
+@@ -346,285 +375,403 @@ out:
  	return rc;
  }
  
@@ -1819,18 +2240,22 @@ index e7b1d6b..e78f328 100755
 -	if (o.destroy) {
 +	if (o->destroy) {
                  if (rank == 0) {
++                        INFO(VERBOSE_1, "Destroying DFS Container: %s", o->cont);
++#if CHECK_DAOS_API_VERSION(1, 4)
++                        daos_cont_destroy(poh, o->cont, 1, NULL);
++#else
                          uuid_t uuid;
 -                        double t1, t2;
- 
+-
 -                        INFO(VERBOSE_1, "Destorying DFS Container: %s\n", o.cont);
 -                        uuid_parse(o.cont, uuid);
 -                        t1 = MPI_Wtime();
-+                        INFO(VERBOSE_1, "Destroying DFS Container: %s", o->cont);
 +                        uuid_parse(o->cont, uuid);
                          rc = daos_cont_destroy(poh, uuid, 1, NULL);
 -                        t2 = MPI_Wtime();
 -                        if (rc == 0)
 -                                INFO(VERBOSE_1, "Container Destroy time = %f secs", t2-t1);
++#endif
 +                        DCHECK(rc, "Failed to destroy container %s", o->cont);
                  }
  
@@ -1986,20 +2411,20 @@ index e7b1d6b..e78f328 100755
 +                parent = lookup_insert_dir(dir_name, NULL);
 +                if (parent == NULL)
 +                        DERR("Failed to lookup parent: %s", dir_name);
-+
+ 
+-	rc = dfs_open(dfs, parent, name, mode, fd_oflag, objectClass,
+-                      o.chunk_size, NULL, &obj);
+-        DCHECK(rc, "dfs_open() of %s Failed", name);
 +                rc = dfs_open(dfs, parent, name, mode, fd_oflag, objectClass,
 +                              o->chunk_size, NULL, &obj);
 +                DCHECK(rc, "dfs_open() of %s Failed", name);
 +        }
  
--	rc = dfs_open(dfs, parent, name, mode, fd_oflag, objectClass,
--                      o.chunk_size, NULL, &obj);
--        DCHECK(rc, "dfs_open() of %s Failed", name);
 +        if (!hints->filePerProc) {
 +                rc = share_file_handle(&obj, testComm);
 +                DCHECK(rc, "global open of %s Failed", name);
 +        }
- 
++
 +out:
  	if (name)
  		free(name);
@@ -2021,7 +2446,7 @@ index e7b1d6b..e78f328 100755
  {
          int xferRetries = 0;
          long long remaining = (long long)length;
-@@ -647,20 +791,23 @@ DFS_Xfer(int access, void *file, IOR_size_t *buffer, IOR_offset_t length,
+@@ -647,21 +794,24 @@ DFS_Xfer(int access, void *file, IOR_size_t *buffer, IOR_offset_t length,
  
                  /* write/read file */
                  if (access == WRITE) {
@@ -2050,11 +2475,13 @@ index e7b1d6b..e78f328 100755
  
                  if (ret < remaining) {
 -                        if (param->singleXferAttempt == TRUE)
+-                                exit(-1);
 +                        if (hints->singleXferAttempt == TRUE)
-                                 exit(-1);
++                                exit(EXIT_FAILURE);
                          if (xferRetries > MAX_RETRY)
                                  ERR("too many retries -- aborting");
-@@ -680,7 +827,7 @@ DFS_Xfer(int access, void *file, IOR_size_t *buffer, IOR_offset_t length,
+                 }
+@@ -680,7 +830,7 @@ DFS_Xfer(int access, void *file, IOR_size_t *buffer, IOR_offset_t length,
   * Perform fsync().
   */
  static void
@@ -2063,7 +2490,7 @@ index e7b1d6b..e78f328 100755
  {
          /* no cache in DFS, so this is a no-op currently */
  	dfs_sync(dfs);
-@@ -691,7 +838,7 @@ DFS_Fsync(void *fd, IOR_param_t * param)
+@@ -691,7 +841,7 @@ DFS_Fsync(void *fd, IOR_param_t * param)
   * Perform sync() on the dfs mount.
   */
  static void
@@ -2072,7 +2499,7 @@ index e7b1d6b..e78f328 100755
  {
          /* no cache in DFS, so this is a no-op currently */
  	dfs_sync(dfs);
-@@ -702,7 +849,7 @@ DFS_Sync(IOR_param_t * param)
+@@ -702,7 +852,7 @@ DFS_Sync(IOR_param_t * param)
   * Close a file through the DFS interface.
   */
  static void
@@ -2081,7 +2508,7 @@ index e7b1d6b..e78f328 100755
  {
          dfs_release((dfs_obj_t *)fd);
  }
-@@ -711,7 +858,7 @@ DFS_Close(void *fd, IOR_param_t * param)
+@@ -711,7 +861,7 @@ DFS_Close(void *fd, IOR_param_t * param)
   * Delete a file through the DFS interface.
   */
  static void
@@ -2090,7 +2517,7 @@ index e7b1d6b..e78f328 100755
  {
  	char *name = NULL, *dir_name = NULL;
  	dfs_obj_t *parent = NULL;
-@@ -725,11 +872,11 @@ DFS_Delete(char *testFileName, IOR_param_t * param)
+@@ -725,11 +875,11 @@ DFS_Delete(char *testFileName, IOR_param_t * param)
  
          parent = lookup_insert_dir(dir_name, NULL);
          if (parent == NULL)
@@ -2105,7 +2532,7 @@ index e7b1d6b..e78f328 100755
  	if (name)
  		free(name);
  	if (dir_name)
-@@ -748,56 +895,67 @@ static char* DFS_GetVersion()
+@@ -748,56 +898,67 @@ static char* DFS_GetVersion()
   * Use DFS stat() to return aggregate file size.
   */
  static IOR_offset_t
@@ -2205,7 +2632,7 @@ index e7b1d6b..e78f328 100755
  {
          dfs_obj_t *parent = NULL;
  	char *name = NULL, *dir_name = NULL;
-@@ -812,20 +970,64 @@ DFS_Mkdir(const char *path, mode_t mode, IOR_param_t * param)
+@@ -812,20 +973,64 @@ DFS_Mkdir(const char *path, mode_t mode, IOR_param_t * param)
  
          parent = lookup_insert_dir(dir_name, NULL);
          if (parent == NULL)
@@ -2273,7 +2700,7 @@ index e7b1d6b..e78f328 100755
  {
          dfs_obj_t *parent = NULL;
  	char *name = NULL, *dir_name = NULL;
-@@ -839,11 +1041,11 @@ DFS_Rmdir(const char *path, IOR_param_t * param)
+@@ -839,11 +1044,11 @@ DFS_Rmdir(const char *path, IOR_param_t * param)
  
          parent = lookup_insert_dir(dir_name, NULL);
          if (parent == NULL)
@@ -2287,7 +2714,7 @@ index e7b1d6b..e78f328 100755
  	if (name)
  		free(name);
  	if (dir_name)
-@@ -854,24 +1056,42 @@ DFS_Rmdir(const char *path, IOR_param_t * param)
+@@ -854,24 +1059,42 @@ DFS_Rmdir(const char *path, IOR_param_t * param)
  }
  
  static int
@@ -2340,7 +2767,7 @@ index e7b1d6b..e78f328 100755
  {
          dfs_obj_t *parent = NULL;
  	char *name = NULL, *dir_name = NULL;
-@@ -885,11 +1105,11 @@ DFS_Stat(const char *path, struct stat *buf, IOR_param_t * param)
+@@ -885,11 +1108,11 @@ DFS_Stat(const char *path, struct stat *buf, IOR_param_t * param)
  
          parent = lookup_insert_dir(dir_name, NULL);
          if (parent == NULL)
@@ -2854,10 +3281,42 @@ index a7af0ea..e94022f 100644
  	.enable_mdtest = true,
  };
 diff --git a/src/aiori-HDF5.c b/src/aiori-HDF5.c
-index ab329db..7f4b72e 100755
+index ab329db..aee5a4b 100755
 --- a/src/aiori-HDF5.c
 +++ b/src/aiori-HDF5.c
-@@ -81,39 +81,53 @@
+@@ -48,19 +48,20 @@
+ #if H5_VERS_MAJOR > 1 && H5_VERS_MINOR > 6
+ #define HDF5_CHECK(HDF5_RETURN, MSG) do {                                \
+     char   resultString[1024];                                           \
++    herr_t _HDF5_RETURN = (HDF5_RETURN);                                 \
+                                                                          \
+-    if (HDF5_RETURN < 0) {                                               \
++    if (_HDF5_RETURN < 0) {                                              \
+         fprintf(stdout, "** error **\n");                                \
+         fprintf(stdout, "ERROR in %s (line %d): %s.\n",                  \
+                 __FILE__, __LINE__, MSG);                                \
+-        strcpy(resultString, H5Eget_major((H5E_major_t)HDF5_RETURN));    \
++        strcpy(resultString, H5Eget_major((H5E_major_t)_HDF5_RETURN));   \
+         if (strcmp(resultString, "Invalid major error number") != 0)     \
+             fprintf(stdout, "HDF5 %s\n", resultString);                  \
+-        strcpy(resultString, H5Eget_minor((H5E_minor_t)HDF5_RETURN));    \
++        strcpy(resultString, H5Eget_minor((H5E_minor_t)_HDF5_RETURN));   \
+         if (strcmp(resultString, "Invalid minor error number") != 0)     \
+             fprintf(stdout, "%s\n", resultString);                       \
+         fprintf(stdout, "** exiting **\n");                              \
+-        exit(-1);                                                        \
++        exit(EXIT_FAILURE);                                                        \
+     }                                                                    \
+ } while(0)
+ #else                           /* ! (H5_VERS_MAJOR > 1 && H5_VERS_MINOR > 6) */
+@@ -75,45 +76,61 @@
+          *            char* mesg, size_t size)                           \
+          */                                                              \
+         fprintf(stdout, "** exiting **\n");                              \
+-        exit(-1);                                                        \
++        exit(EXIT_FAILURE);                                                        \
+     }                                                                    \
+ } while(0)
  #endif                          /* H5_VERS_MAJOR > 1 && H5_VERS_MINOR > 6 */
  /**************************** P R O T O T Y P E S *****************************/
  
@@ -2889,9 +3348,9 @@ index ab329db..7f4b72e 100755
  
  /************************** O P T I O N S *****************************/
  typedef struct{
++  mpiio_options_t mpio;
++  
    int collective_md;
-+  char * hintsFileName;            /* full name for hints file */
-+  int showHints;                   /* show hints */
 +  int individualDataSets;          /* datasets not shared by all procs */
 +  int noFill;                      /* no fill in file creation */
 +  IOR_offset_t setAlignment;       /* alignment in bytes */
@@ -2915,16 +3374,18 @@ index ab329db..7f4b72e 100755
 +  *init_backend_options = (aiori_mod_opt_t*) o;
  
    option_help h [] = {
++    /* options imported from MPIIO */
++    {0, "hdf5.hintsFileName","Full name for hints file", OPTION_OPTIONAL_ARGUMENT, 's', & o->mpio.hintsFileName},
++    {0, "hdf5.showHints",    "Show MPI hints", OPTION_FLAG, 'd', & o->mpio.showHints},    
++    /* generic options */
      {0, "hdf5.collectiveMetadata", "Use collectiveMetadata (available since HDF5-1.10.0)", OPTION_FLAG, 'd', & o->collective_md},
-+    {0, "hdf5.hintsFileName","Full name for hints file", OPTION_OPTIONAL_ARGUMENT, 's', & o->hintsFileName},
-+    {0, "hdf5.showHints",    "Show MPI hints", OPTION_FLAG, 'd', & o->showHints},
 +    {0, "hdf5.individualDataSets",        "Datasets not shared by all procs [not working]", OPTION_FLAG, 'd', & o->individualDataSets},
 +    {0, "hdf5.setAlignment",        "HDF5 alignment in bytes (e.g.: 8, 4k, 2m, 1g)", OPTION_OPTIONAL_ARGUMENT, 'd', & o->setAlignment},
 +    {0, "hdf5.noFill", "No fill in HDF5 file creation", OPTION_FLAG, 'd', & o->noFill},
      LAST_OPTION
    };
    option_help * help = malloc(sizeof(h));
-@@ -133,6 +147,7 @@ ior_aiori_t hdf5_aiori = {
+@@ -133,6 +150,7 @@ ior_aiori_t hdf5_aiori = {
          .close = HDF5_Close,
          .delete = HDF5_Delete,
          .get_version = HDF5_GetVersion,
@@ -2932,7 +3393,7 @@ index ab329db..7f4b72e 100755
          .fsync = HDF5_Fsync,
          .get_file_size = HDF5_GetFileSize,
          .statfs = aiori_posix_statfs,
-@@ -140,7 +155,8 @@ ior_aiori_t hdf5_aiori = {
+@@ -140,7 +158,8 @@ ior_aiori_t hdf5_aiori = {
          .rmdir = aiori_posix_rmdir,
          .access = HDF5_Access,
          .stat = aiori_posix_stat,
@@ -2942,7 +3403,7 @@ index ab329db..7f4b72e 100755
  };
  
  static hid_t xferPropList;      /* xfer property list */
-@@ -151,20 +167,49 @@ hid_t memDataSpace;             /* memory data space id */
+@@ -151,20 +170,37 @@ hid_t memDataSpace;             /* memory data space id */
  int newlyOpenedFile;            /* newly opened file */
  
  /***************************** F U N C T I O N S ******************************/
@@ -2960,18 +3421,6 @@ index ab329db..7f4b72e 100755
 +      ERR("alignment must be non-negative integer");
 +  if (o->individualDataSets)
 +      ERR("individual data sets not implemented");
-+  if (o->noFill) {
-+    /* check if hdf5 available */
-+#if defined (H5_VERS_MAJOR) && defined (H5_VERS_MINOR)
-+    /* no-fill option not available until hdf5-1.6.x */
-+#if (H5_VERS_MAJOR > 0 && H5_VERS_MINOR > 5)
-+#else
-+    ERR("'no fill' option not available in HDF5");
-+#endif
-+#else
-+    WARN("unable to determine HDF5 version for 'no fill' usage");
-+#endif
-+  }
 +  return 0;
 +}
  
@@ -2995,7 +3444,7 @@ index ab329db..7f4b72e 100755
          hid_t accessPropList, createPropList;
          hsize_t memStart[NUM_DIMS],
              dataSetDims[NUM_DIMS],
-@@ -182,36 +227,27 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
+@@ -182,36 +218,27 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
          /*
           * HDF5 uses different flags than those for POSIX/MPIIO
           */
@@ -3039,7 +3488,7 @@ index ab329db..7f4b72e 100755
                  fprintf(stdout, "O_DIRECT not implemented in HDF5\n");
          }
  
-@@ -231,13 +267,13 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
+@@ -231,13 +258,12 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
           * someday HDF5 implementation will allow subsets of MPI_COMM_WORLD
           */
          /* store MPI communicator info for the file access property list */
@@ -3051,20 +3500,20 @@ index ab329db..7f4b72e 100755
          }
  
 -        SetHints(&mpiHints, param->hintsFileName);
-+        SetHints(&mpiHints, o->hintsFileName);
          /*
           * note that with MP_HINTS_FILTERED=no, all key/value pairs will
           * be in the info object.  The info object that is attached to
-@@ -245,7 +281,7 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
+@@ -245,7 +271,8 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
           * deemed valid by the implementation.
           */
          /* show hints passed to file */
 -        if (rank == 0 && param->showHints) {
-+        if (rank == 0 && o->showHints) {
++        SetHints(&mpiHints, o->mpio.hintsFileName);
++        if (rank == 0 && o->mpio.showHints) {
                  fprintf(stdout, "\nhints passed to access property list {\n");
                  ShowHints(&mpiHints);
                  fprintf(stdout, "}\n");
-@@ -254,12 +290,11 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
+@@ -254,12 +281,10 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
                     "cannot set file access property list");
  
          /* set alignment */
@@ -3075,11 +3524,10 @@ index ab329db..7f4b72e 100755
  
  #ifdef HAVE_H5PSET_ALL_COLL_METADATA_OPS
 -        HDF5_options_t *o = (HDF5_options_t*) param->backend_options;
-+
          if (o->collective_md) {
                  /* more scalable metadata */
  
-@@ -271,10 +306,9 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
+@@ -271,10 +296,9 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
  #endif
  
          /* open file */
@@ -3093,19 +3541,58 @@ index ab329db..7f4b72e 100755
                    HDF5_CHECK(*fd, "cannot create file");
            } else {                /* READ or CHECK */
                    *fd = H5Fopen(testFileName, fd_mode, accessPropList);
-@@ -283,9 +317,8 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
+@@ -283,41 +307,18 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
          }
  
          /* show hints actually attached to file handle */
 -        if (param->showHints || (1) /* WEL - this needs fixing */ ) {
 -                if (rank == 0
 -                    && (param->showHints) /* WEL - this needs fixing */ ) {
-+        if (o->showHints || (1) /* WEL - this needs fixing */ ) {
-+                if (rank == 0 && (o->showHints) /* WEL - this needs fixing */ ) {
-                         WARN("showHints not working for HDF5");
-                 }
-         } else {
-@@ -334,7 +367,7 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
+-                        WARN("showHints not working for HDF5");
+-                }
+-        } else {
+-                MPI_Info mpiHintsCheck = MPI_INFO_NULL;
+-                hid_t apl;
+-                apl = H5Fget_access_plist(*fd);
+-                HDF5_CHECK(H5Pget_fapl_mpio(apl, &comm, &mpiHintsCheck),
+-                           "cannot get info object through HDF5");
++        if (o->mpio.showHints) {
++                MPI_File *fd_mpiio;
++                HDF5_CHECK(H5Fget_vfd_handle(*fd, accessPropList, (void **) &fd_mpiio), "cannot get file handle");
++                MPI_Info info_used;
++                MPI_CHECK(MPI_File_get_info(*fd_mpiio, &info_used), "cannot get file info");
+                 if (rank == 0) {
+-                        fprintf(stdout,
+-                                "\nhints returned from opened file (HDF5) {\n");
+-                        ShowHints(&mpiHintsCheck);
+-                        fprintf(stdout, "}\n");
+-                        if (1 == 1) {   /* request the MPIIO file handle and its hints */
+-                                MPI_File *fd_mpiio;
+-                                HDF5_CHECK(H5Fget_vfd_handle
+-                                           (*fd, apl, (void **)&fd_mpiio),
+-                                           "cannot get MPIIO file handle");
+-                                if (mpiHintsCheck != MPI_INFO_NULL)
+-                                        MPI_Info_free(&mpiHintsCheck);
+-                                MPI_CHECK(MPI_File_get_info
+-                                          (*fd_mpiio, &mpiHintsCheck),
+-                                          "cannot get info object through MPIIO");
+-                                fprintf(stdout,
+-                                        "\nhints returned from opened file (MPIIO) {\n");
+-                                ShowHints(&mpiHintsCheck);
++                        /* print the MPI file hints currently used */
++                        fprintf(stdout, "\nhints returned from opened file {\n");
++                        ShowHints(&info_used);
+                                 fprintf(stdout, "}\n");
+-                                if (mpiHintsCheck != MPI_INFO_NULL)
+-                                        MPI_Info_free(&mpiHintsCheck);
+                         }
+-                }
+-                MPI_CHECK(MPI_Barrier(testComm), "barrier error");
++                MPI_CHECK(MPI_Info_free(&info_used), "cannot free file info");
+         }
+ 
+         /* this is necessary for resetting various parameters
+@@ -334,7 +335,7 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
          HDF5_CHECK(xferPropList, "cannot create transfer property list");
  
          /* set data transfer mode */
@@ -3114,7 +3601,7 @@ index ab329db..7f4b72e 100755
                  HDF5_CHECK(H5Pset_dxpl_mpio(xferPropList, H5FD_MPIO_COLLECTIVE),
                             "cannot set collective data transfer mode");
          } else {
-@@ -346,9 +379,9 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
+@@ -346,9 +347,9 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
          /* set up memory data space for transfer */
          memStart[0] = (hsize_t) 0;
          memCount[0] = (hsize_t) 1;
@@ -3127,7 +3614,7 @@ index ab329db..7f4b72e 100755
          memDataSpace = H5Screate_simple(NUM_DIMS, memDataSpaceDims, NULL);
          HDF5_CHECK(memDataSpace, "cannot create simple memory data space");
  
-@@ -358,18 +391,18 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
+@@ -358,18 +359,18 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
                                         memBlock), "cannot create hyperslab");
  
          /* set up parameters for fpp or different dataset count */
@@ -3150,7 +3637,7 @@ index ab329db..7f4b72e 100755
                                      * tasksPerDataSet);
  
          /* create a simple data space containing information on size
-@@ -379,14 +412,14 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
+@@ -379,14 +380,14 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
          if (mpiHints != MPI_INFO_NULL)
                  MPI_Info_free(&mpiHints);
  
@@ -3168,7 +3655,7 @@ index ab329db..7f4b72e 100755
  {
          static int firstReadCheck = FALSE, startNewDataSet;
          IOR_offset_t segmentPosition, segmentSize;
-@@ -405,17 +438,16 @@ static IOR_offset_t HDF5_Xfer(int access, void *fd, IOR_size_t * buffer,
+@@ -405,17 +406,16 @@ static IOR_offset_t HDF5_Xfer(int access, void *fd, IOR_size_t * buffer,
          }
  
          /* determine by offset if need to start new data set */
@@ -3192,7 +3679,7 @@ index ab329db..7f4b72e 100755
              0) {
                  /*
                   * ordinarily start a new data set, unless this is the
-@@ -427,7 +459,7 @@ static IOR_offset_t HDF5_Xfer(int access, void *fd, IOR_size_t * buffer,
+@@ -427,7 +427,7 @@ static IOR_offset_t HDF5_Xfer(int access, void *fd, IOR_size_t * buffer,
                  }
          }
  
@@ -3201,7 +3688,7 @@ index ab329db..7f4b72e 100755
            return length;
  
          /* create new data set */
-@@ -438,10 +470,10 @@ static IOR_offset_t HDF5_Xfer(int access, void *fd, IOR_size_t * buffer,
+@@ -438,10 +438,10 @@ static IOR_offset_t HDF5_Xfer(int access, void *fd, IOR_size_t * buffer,
                          HDF5_CHECK(H5Sclose(fileDataSpace),
                                     "cannot close file data space");
                  }
@@ -3214,7 +3701,7 @@ index ab329db..7f4b72e 100755
  
          /* this is necessary to reset variables for reaccessing file */
          startNewDataSet = FALSE;
-@@ -465,19 +497,18 @@ static IOR_offset_t HDF5_Xfer(int access, void *fd, IOR_size_t * buffer,
+@@ -465,19 +465,19 @@ static IOR_offset_t HDF5_Xfer(int access, void *fd, IOR_size_t * buffer,
  /*
   * Perform fsync().
   */
@@ -3222,6 +3709,7 @@ index ab329db..7f4b72e 100755
 +static void HDF5_Fsync(aiori_fd_t *fd, aiori_mod_opt_t * param)
  {
 -        ;
++        HDF5_CHECK(H5Fflush(*(hid_t *) fd, H5F_SCOPE_LOCAL), "cannot flush file to disk");
  }
  
  /*
@@ -3238,7 +3726,7 @@ index ab329db..7f4b72e 100755
                  HDF5_CHECK(H5Dclose(dataSet), "cannot close data set");
                  HDF5_CHECK(H5Sclose(dataSpace), "cannot close data space");
                  HDF5_CHECK(H5Sclose(fileDataSpace),
-@@ -486,7 +517,7 @@ static void HDF5_Close(void *fd, IOR_param_t * param)
+@@ -486,7 +486,7 @@ static void HDF5_Close(void *fd, IOR_param_t * param)
                             "cannot close memory data space");
                  HDF5_CHECK(H5Pclose(xferPropList),
                             " cannot close transfer property list");
@@ -3247,7 +3735,7 @@ index ab329db..7f4b72e 100755
          HDF5_CHECK(H5Fclose(*(hid_t *) fd), "cannot close file");
          free(fd);
  }
-@@ -494,9 +525,9 @@ static void HDF5_Close(void *fd, IOR_param_t * param)
+@@ -494,9 +494,9 @@ static void HDF5_Close(void *fd, IOR_param_t * param)
  /*
   * Delete a file through the HDF5 interface.
   */
@@ -3259,7 +3747,7 @@ index ab329db..7f4b72e 100755
      return
    MPIIO_Delete(testFileName, param);
    return;
-@@ -528,23 +559,24 @@ static char * HDF5_GetVersion()
+@@ -528,23 +528,24 @@ static char * HDF5_GetVersion()
   * Seek to offset in file using the HDF5 interface and set up hyperslab.
   */
  static IOR_offset_t SeekOffset(void *fd, IOR_offset_t offset,
@@ -3290,7 +3778,7 @@ index ab329db..7f4b72e 100755
                                          / sizeof(IOR_size_t));
          } else {
                  /* start at a unique offset if shared */
-@@ -552,8 +584,8 @@ static IOR_offset_t SeekOffset(void *fd, IOR_offset_t offset,
+@@ -552,8 +553,8 @@ static IOR_offset_t SeekOffset(void *fd, IOR_offset_t offset,
                      (hsize_t) ((offset % segmentSize) / sizeof(IOR_size_t));
          }
          hsCount[0] = (hsize_t) 1;
@@ -3301,7 +3789,7 @@ index ab329db..7f4b72e 100755
  
          /* retrieve data space from data set for hyperslab */
          fileDataSpace = H5Dget_space(dataSet);
-@@ -567,8 +599,9 @@ static IOR_offset_t SeekOffset(void *fd, IOR_offset_t offset,
+@@ -567,8 +568,9 @@ static IOR_offset_t SeekOffset(void *fd, IOR_offset_t offset,
  /*
   * Create HDF5 data set.
   */
@@ -3312,7 +3800,7 @@ index ab329db..7f4b72e 100755
          char dataSetName[MAX_STR];
          hid_t dataSetPropList;
          int dataSetID;
-@@ -582,8 +615,8 @@ static void SetupDataSet(void *fd, IOR_param_t * param)
+@@ -582,8 +584,8 @@ static void SetupDataSet(void *fd, IOR_param_t * param)
                  dataSetSuffix = 0;
  
          /* may want to use individual access to each data set someday */
@@ -3323,7 +3811,7 @@ index ab329db..7f4b72e 100755
          } else {
                  dataSetID = 0;
          }
-@@ -591,14 +624,14 @@ static void SetupDataSet(void *fd, IOR_param_t * param)
+@@ -591,14 +593,10 @@ static void SetupDataSet(void *fd, IOR_param_t * param)
          sprintf(dataSetName, "%s-%04d.%04d", "Dataset", dataSetID,
                  dataSetSuffix++);
  
@@ -3331,16 +3819,32 @@ index ab329db..7f4b72e 100755
 +        if (flags & IOR_CREAT) {     /* WRITE */
                  /* create data set */
                  dataSetPropList = H5Pcreate(H5P_DATASET_CREATE);
-                 /* check if hdf5 available */
- #if defined (H5_VERS_MAJOR) && defined (H5_VERS_MINOR)
-                 /* no-fill option not available until hdf5-1.6.x */
- #if (H5_VERS_MAJOR > 0 && H5_VERS_MINOR > 5)
+-                /* check if hdf5 available */
+-#if defined (H5_VERS_MAJOR) && defined (H5_VERS_MINOR)
+-                /* no-fill option not available until hdf5-1.6.x */
+-#if (H5_VERS_MAJOR > 0 && H5_VERS_MINOR > 5)
 -                if (param->noFill == TRUE) {
 +                if (o->noFill == TRUE) {
                          if (rank == 0 && verbose >= VERBOSE_1) {
                                  fprintf(stdout, "\nusing 'no fill' option\n");
                          }
-@@ -629,19 +662,19 @@ static void SetupDataSet(void *fd, IOR_param_t * param)
+@@ -606,15 +604,6 @@ static void SetupDataSet(void *fd, IOR_param_t * param)
+                                                     H5D_FILL_TIME_NEVER),
+                                    "cannot set fill time for property list");
+                 }
+-#else
+-                char errorString[MAX_STR];
+-                sprintf(errorString, "'no fill' option not available in %s",
+-                        test->apiVersion);
+-                ERR(errorString);
+-#endif
+-#else
+-                WARN("unable to determine HDF5 version for 'no fill' usage");
+-#endif
+                 dataSet =
+                     H5Dcreate(*(hid_t *) fd, dataSetName, H5T_NATIVE_LLONG,
+                               dataSpace, dataSetPropList);
+@@ -629,19 +618,19 @@ static void SetupDataSet(void *fd, IOR_param_t * param)
   * Use MPIIO call to get file size.
   */
  static IOR_offset_t
@@ -3366,16 +3870,21 @@ index ab329db..7f4b72e 100755
    return(MPIIO_Access(path, mode, param));
  }
 diff --git a/src/aiori-HDFS.c b/src/aiori-HDFS.c
-index 2d4dcb1..8c528ab 100755
+index 2d4dcb1..7503425 100755
 --- a/src/aiori-HDFS.c
 +++ b/src/aiori-HDFS.c
-@@ -77,14 +77,13 @@
+@@ -77,14 +77,17 @@
  #include <sys/stat.h>
  #include <assert.h>
  /*
 -#ifdef HAVE_LUSTRE_LUSTRE_USER_H
+-#include <lustre/lustre_user.h>
 +#ifdef HAVE_LUSTRE_USER
- #include <lustre/lustre_user.h>
++#  ifdef HAVE_LINUX_LUSTRE_LUSTRE_USER_H
++#    include <linux/lustre/lustre_user.h>
++#  elif defined(HAVE_LUSTRE_LUSTRE_USER_H)
++#    include <lustre/lustre_user.h>
++#  endif
  #endif
  */
 -
@@ -3386,7 +3895,7 @@ index 2d4dcb1..8c528ab 100755
  
  #ifndef   open64                /* necessary for TRU64 -- */
  # define open64  open            /* unlikely, but may pose */
-@@ -101,15 +100,23 @@
+@@ -101,15 +104,23 @@
  #include "hdfs.h"
  
  /**************************** P R O T O T Y P E S *****************************/
@@ -3419,7 +3928,7 @@ index 2d4dcb1..8c528ab 100755
  
  /************************** D E C L A R A T I O N S ***************************/
  
-@@ -121,13 +128,120 @@ ior_aiori_t hdfs_aiori = {
+@@ -121,13 +132,120 @@ ior_aiori_t hdfs_aiori = {
  	.xfer = HDFS_Xfer,
  	.close = HDFS_Close,
  	.delete = HDFS_Delete,
@@ -3541,7 +4050,7 @@ index 2d4dcb1..8c528ab 100755
  /* This is identical to the one in aiori-POSIX.c  Doesn't seem like
   * it would be appropriate in utilities.c.
   */
-@@ -159,16 +273,16 @@ void hdfs_set_o_direct_flag(int *fd)
+@@ -159,16 +277,16 @@ void hdfs_set_o_direct_flag(int *fd)
   * NOTE: It's okay to call this thing whenever you need to be sure the HDFS
   *       filesystem is connected.
   */
@@ -3565,7 +4074,7 @@ index 2d4dcb1..8c528ab 100755
  			printf("<- hdfs_connect  [nothing to do]\n"); /* DEBUGGING */
  		}
  		return;
-@@ -176,34 +290,35 @@ static void hdfs_connect( IOR_param_t* param ) {
+@@ -176,34 +294,35 @@ static void hdfs_connect( IOR_param_t* param ) {
  
  	/* initialize a builder, holding parameters for hdfsBuilderConnect() */
  	struct hdfsBuilder* builder = hdfsNewBuilder();
@@ -3616,7 +4125,7 @@ index 2d4dcb1..8c528ab 100755
  		printf("<- hdfs_disconnect\n");
  	}
  }
-@@ -214,16 +329,17 @@ static void hdfs_disconnect( IOR_param_t* param ) {
+@@ -214,16 +333,17 @@ static void hdfs_disconnect( IOR_param_t* param ) {
   * Return an hdfsFile.
   */
  
@@ -3637,7 +4146,7 @@ index 2d4dcb1..8c528ab 100755
  
  	/*
  	 * Check for unsupported flags.
-@@ -234,15 +350,15 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
+@@ -234,15 +354,15 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
  	 * The other two, we just note that they are not supported and don't do them.
  	 */
  
@@ -3656,7 +4165,7 @@ index 2d4dcb1..8c528ab 100755
  		fprintf( stdout, "Opening or creating a file for appending is not implemented in HDFS\n" );
  	}
  
-@@ -254,8 +370,8 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
+@@ -254,8 +374,8 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
  		fd_oflags = O_CREAT;
  	}
  
@@ -3667,7 +4176,7 @@ index 2d4dcb1..8c528ab 100755
  
  			// in N-1 mode, only rank 0 truncates the file
  			if ( rank != 0 ) {
-@@ -279,7 +395,7 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
+@@ -279,7 +399,7 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
  	 * Now see if O_DIRECT is needed.
  	 */
  
@@ -3676,7 +4185,7 @@ index 2d4dcb1..8c528ab 100755
  		hdfs_set_o_direct_flag( &fd_oflags );
  	}
  
-@@ -290,10 +406,7 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
+@@ -290,10 +410,7 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
  	 * truncate each other's writes
  	 */
  
@@ -3688,7 +4197,7 @@ index 2d4dcb1..8c528ab 100755
  		MPI_CHECK(MPI_Barrier(testComm), "barrier error");
  	}
  
-@@ -301,21 +414,16 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
+@@ -301,21 +418,16 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
  	 * Now rank zero can open and truncate, if necessary.
  	 */
  
@@ -3718,7 +4227,7 @@ index 2d4dcb1..8c528ab 100755
  	if ( ! hdfs_file ) {
  		ERR( "Failed to open the file" );
  	}
-@@ -324,14 +432,14 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
+@@ -324,14 +436,14 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
  	 * For N-1 write, Rank 0 waits for the other ranks to open the file after it has.
  	 */
  
@@ -3736,7 +4245,7 @@ index 2d4dcb1..8c528ab 100755
  		printf("<- HDFS_Create_Or_Open\n");
  	}
  	return ((void *) hdfs_file );
-@@ -341,36 +449,36 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
+@@ -341,36 +453,36 @@ static void *HDFS_Create_Or_Open( char *testFileName, IOR_param_t *param, unsign
   * Create and open a file through the HDFS interface.
   */
  
@@ -3784,7 +4293,7 @@ index 2d4dcb1..8c528ab 100755
  	}
  }
  
-@@ -378,19 +486,18 @@ static void *HDFS_Open( char *testFileName, IOR_param_t * param ) {
+@@ -378,19 +490,18 @@ static void *HDFS_Open( char *testFileName, IOR_param_t * param ) {
   * Write or read to file using the HDFS interface.
   */
  
@@ -3810,7 +4319,7 @@ index 2d4dcb1..8c528ab 100755
  	hdfsFile  hdfs_file = (hdfsFile)file; /* (void*) */
  
  
-@@ -401,37 +508,34 @@ static IOR_offset_t HDFS_Xfer(int access, void *file, IOR_size_t * buffer,
+@@ -401,37 +512,34 @@ static IOR_offset_t HDFS_Xfer(int access, void *file, IOR_size_t * buffer,
  			if (verbose >= VERBOSE_4) {
  				fprintf( stdout, "task %d writing to offset %lld\n",
  						rank,
@@ -3857,7 +4366,7 @@ index 2d4dcb1..8c528ab 100755
  			if ( rc == 0 ) {
  				ERR( "hdfs_read() returned EOF prematurely" );
  			}
-@@ -449,9 +553,9 @@ static IOR_offset_t HDFS_Xfer(int access, void *file, IOR_size_t * buffer,
+@@ -449,9 +557,9 @@ static IOR_offset_t HDFS_Xfer(int access, void *file, IOR_size_t * buffer,
  					rank,
  					access == WRITE ? "hdfsWrite()" : "hdfs_read()",
  					rc, remaining,
@@ -3869,7 +4378,7 @@ index 2d4dcb1..8c528ab 100755
  				MPI_CHECK( MPI_Abort( MPI_COMM_WORLD, -1 ), "barrier error" );
  			}
  
-@@ -467,7 +571,16 @@ static IOR_offset_t HDFS_Xfer(int access, void *file, IOR_size_t * buffer,
+@@ -467,7 +575,16 @@ static IOR_offset_t HDFS_Xfer(int access, void *file, IOR_size_t * buffer,
  		xferRetries++;
  	}
  
@@ -3887,7 +4396,7 @@ index 2d4dcb1..8c528ab 100755
  		printf("<- HDFS_Xfer\n");
  	}
  	return ( length );
-@@ -476,67 +589,38 @@ static IOR_offset_t HDFS_Xfer(int access, void *file, IOR_size_t * buffer,
+@@ -476,39 +593,17 @@ static IOR_offset_t HDFS_Xfer(int access, void *file, IOR_size_t * buffer,
  /*
   * Perform hdfs_sync().
   */
@@ -3923,17 +4432,18 @@ index 2d4dcb1..8c528ab 100755
 -		printf("\thdfsFlush(0x%llx, 0x%llx)\n", hdfs_fs, hdfs_file);
 -	}
 -	if ( hdfsFlush( hdfs_fs, hdfs_file ) != 0 ) {
-+    // Hsync is implemented to flush out data with newer Hadoop versions
- 		EWARN( "hdfsFlush() failed" );
- 	}
+-		EWARN( "hdfsFlush() failed" );
+-	}
 -#endif
 -
 -	if (param->verbose >= VERBOSE_4) {
 -		printf("<- HDFS_Fsync\n");
--	}
++    // Hsync is implemented to flush out data with newer Hadoop versions
++		WARN( "hdfsFlush() failed" );
+ 	}
  }
  
- /*
+@@ -516,27 +611,20 @@ static void HDFS_Fsync( void *fd, IOR_param_t * param ) {
   * Close a file through the HDFS interface.
   */
  
@@ -3966,7 +4476,7 @@ index 2d4dcb1..8c528ab 100755
  		printf("<- HDFS_Close\n");
  	}
  }
-@@ -547,119 +631,66 @@ static void HDFS_Close( void *fd, IOR_param_t * param ) {
+@@ -547,119 +635,66 @@ static void HDFS_Close( void *fd, IOR_param_t * param ) {
   * NOTE: The signature for ior_aiori.delete doesn't include a parameter to
   * select recursive deletes.  We'll assume that that is never needed.
   */
@@ -3996,7 +4506,8 @@ index 2d4dcb1..8c528ab 100755
 +		sprintf(errmsg, "[RANK %03d]: hdfsDelete() of file \"%s\" failed\n",
  		        rank, testFileName);
  
- 		EWARN( errmsg );
+-		EWARN( errmsg );
++		WARN( errmsg );
  	}
 -	if (param->verbose >= VERBOSE_4) {
 +	if (verbose >= VERBOSE_4) {
@@ -4107,7 +4618,7 @@ index 2d4dcb1..8c528ab 100755
  	}
  	return ( aggFileSizeFromStat );
 diff --git a/src/aiori-IME.c b/src/aiori-IME.c
-index 500f380..2371fdc 100755
+index 500f380..896dd67 100755
 --- a/src/aiori-IME.c
 +++ b/src/aiori-IME.c
 @@ -21,8 +21,8 @@
@@ -4475,7 +4986,7 @@ index 500f380..2371fdc 100755
 +
          if (ime_native_unlink(testFileName) != 0)
 -                WARN(errmsg);
-+                EWARNF("[RANK %03d]: cannot delete file \"%s\"\n",
++                WARNF("[RANK %03d]: cannot delete file \"%s\"\n",
 +                       rank, testFileName);
  }
  
@@ -4651,7 +5162,7 @@ index 500f380..2371fdc 100755
  }
  #endif
 diff --git a/src/aiori-MMAP.c b/src/aiori-MMAP.c
-index 7be860a..5fa13f8 100644
+index 7be860a..3777be5 100644
 --- a/src/aiori-MMAP.c
 +++ b/src/aiori-MMAP.c
 @@ -22,18 +22,20 @@
@@ -4835,9 +5346,10 @@ index 7be860a..5fa13f8 100644
  {
 -        mmap_options_t *o = (mmap_options_t*) param->backend_options;
 -        if (msync(o->mmap_ptr, param->expectedAggFileSize, MS_SYNC) != 0)
+-                EWARN("msync() failed");
 +        mmap_options_t *o = (mmap_options_t*) param;
 +        if (msync(o->mmap_ptr, hints->expectedAggFileSize, MS_SYNC) != 0)
-                 EWARN("msync() failed");
++                WARN("msync() failed");
  }
  
  /*
@@ -4854,10 +5366,10 @@ index 7be860a..5fa13f8 100644
          o->mmap_ptr = NULL;
          POSIX_Close(fd, param);
 diff --git a/src/aiori-MPIIO.c b/src/aiori-MPIIO.c
-index 04c10be..070cff0 100755
+index 04c10be..059755e 100755
 --- a/src/aiori-MPIIO.c
 +++ b/src/aiori-MPIIO.c
-@@ -31,23 +31,65 @@
+@@ -31,23 +31,56 @@
  
  /**************************** P R O T O T Y P E S *****************************/
  
@@ -4889,15 +5401,6 @@ index 04c10be..070cff0 100755
 +  MPI_Datatype fileType;           /* filetype for file view */
 +} mpiio_fd_t;
 +
-+typedef struct {
-+  int showHints;                   /* show hints */
-+  int useFileView;                 /* use MPI_File_set_view */
-+  int preallocate;                 /* preallocate file size */
-+  int useSharedFilePointer;        /* use shared file pointer */
-+  int useStridedDatatype;          /* put strided access into datatype */
-+  char * hintsFileName;            /* full name for hints file */
-+} mpiio_options_t;
-+
 +static option_help * MPIIO_options(aiori_mod_opt_t ** init_backend_options, aiori_mod_opt_t * init_values){
 +  mpiio_options_t * o = malloc(sizeof(mpiio_options_t));
 +  if (init_values != NULL){
@@ -4907,7 +5410,7 @@ index 04c10be..070cff0 100755
 +  }
 +  *init_backend_options = (aiori_mod_opt_t*) o;
 +
-+  option_help h [] = {
++  option_help h [] = { 
 +    {0, "mpiio.hintsFileName","Full name for hints file", OPTION_OPTIONAL_ARGUMENT, 's', & o->hintsFileName},
 +    {0, "mpiio.showHints",    "Show MPI hints", OPTION_FLAG, 'd', & o->showHints},
 +    {0, "mpiio.preallocate",   "Preallocate file size", OPTION_FLAG, 'd', & o->preallocate},
@@ -4931,7 +5434,7 @@ index 04c10be..070cff0 100755
          .open = MPIIO_Open,
          .xfer = MPIIO_Xfer,
          .close = MPIIO_Close,
-@@ -60,18 +102,46 @@ ior_aiori_t mpiio_aiori = {
+@@ -60,18 +93,46 @@ ior_aiori_t mpiio_aiori = {
          .rmdir = aiori_posix_rmdir,
          .access = MPIIO_Access,
          .stat = aiori_posix_stat,
@@ -4980,7 +5483,7 @@ index 04c10be..070cff0 100755
      MPI_File fd;
      int mpi_mode = MPI_MODE_UNIQUE_OPEN;
      MPI_Info mpiHints = MPI_INFO_NULL;
-@@ -98,60 +168,49 @@ int MPIIO_Access(const char *path, int mode, IOR_param_t *param)
+@@ -98,60 +159,49 @@ int MPIIO_Access(const char *path, int mode, IOR_param_t *param)
  /*
   * Create and open a file through the MPIIO interface.
   */
@@ -5057,7 +5560,7 @@ index 04c10be..070cff0 100755
                  fprintf(stdout, "O_DIRECT not implemented in MPIIO\n");
          }
  
-@@ -162,7 +221,7 @@ static void *MPIIO_Open(char *testFileName, IOR_param_t * param)
+@@ -162,7 +212,7 @@ static void *MPIIO_Open(char *testFileName, IOR_param_t * param)
           */
          fd_mode |= MPI_MODE_UNIQUE_OPEN;
  
@@ -5066,7 +5569,7 @@ index 04c10be..070cff0 100755
                  comm = MPI_COMM_SELF;
          } else {
                  comm = testComm;
-@@ -181,16 +240,19 @@ static void *MPIIO_Open(char *testFileName, IOR_param_t * param)
+@@ -181,16 +231,19 @@ static void *MPIIO_Open(char *testFileName, IOR_param_t * param)
                  ShowHints(&mpiHints);
                  fprintf(stdout, "}\n");
          }
@@ -5090,7 +5593,7 @@ index 04c10be..070cff0 100755
                            "cannot get file info");
                  fprintf(stdout, "\nhints returned from opened file {\n");
                  ShowHints(&mpiHints);
-@@ -198,78 +260,88 @@ static void *MPIIO_Open(char *testFileName, IOR_param_t * param)
+@@ -198,78 +251,88 @@ static void *MPIIO_Open(char *testFileName, IOR_param_t * param)
          }
  
          /* preallocate space for file */
@@ -5223,7 +5726,7 @@ index 04c10be..070cff0 100755
  
          int (MPIAPI * Access) (MPI_File, void *, int,
                                 MPI_Datatype, MPI_Status *);
-@@ -313,42 +385,59 @@ static IOR_offset_t MPIIO_Xfer(int access, void *fd, IOR_size_t * buffer,
+@@ -313,42 +376,59 @@ static IOR_offset_t MPIIO_Xfer(int access, void *fd, IOR_size_t * buffer,
                   *   Access_ordered = MPI_File_read_ordered;
                   */
          }
@@ -5299,7 +5802,7 @@ index 04c10be..070cff0 100755
                  }
          } else {
                  /*
-@@ -358,7 +447,7 @@ static IOR_offset_t MPIIO_Xfer(int access, void *fd, IOR_size_t * buffer,
+@@ -358,7 +438,7 @@ static IOR_offset_t MPIIO_Xfer(int access, void *fd, IOR_size_t * buffer,
                  if (param->useSharedFilePointer) {
                          /* find offset in file */
                          if (SeekOffset
@@ -5308,7 +5811,7 @@ index 04c10be..070cff0 100755
                                  /* if unsuccessful */
                                  length = -1;
                          } else {
-@@ -374,63 +463,65 @@ static IOR_offset_t MPIIO_Xfer(int access, void *fd, IOR_size_t * buffer,
+@@ -374,63 +454,65 @@ static IOR_offset_t MPIIO_Xfer(int access, void *fd, IOR_size_t * buffer,
                                          "useSharedFilePointer not implemented\n");
                          }
                  } else {
@@ -5347,9 +5850,10 @@ index 04c10be..070cff0 100755
 +  if(hints->dryRun)
      return;
 -  if (MPI_File_sync(*(MPI_File *)fdp) != MPI_SUCCESS)
+-      EWARN("fsync() failed");
 +  mpiio_fd_t * mfd = (mpiio_fd_t*) fdp;
 +  if (MPI_File_sync(mfd->fd) != MPI_SUCCESS)
-       EWARN("fsync() failed");
++      WARN("fsync() failed");
  }
  
  /*
@@ -5397,7 +5901,7 @@ index 04c10be..070cff0 100755
      return;
    MPI_CHECKF(MPI_File_delete(testFileName, (MPI_Info) MPI_INFO_NULL),
               "cannot delete file: %s", testFileName);
-@@ -452,36 +543,37 @@ static char* MPIIO_GetVersion()
+@@ -452,36 +534,37 @@ static char* MPIIO_GetVersion()
   * Seek to offset in file using the MPIIO interface.
   */
  static IOR_offset_t SeekOffset(MPI_File fd, IOR_offset_t offset,
@@ -5446,7 +5950,7 @@ index 04c10be..070cff0 100755
                  }
          }
          MPI_CHECK(MPI_File_seek(fd, tempOffset, MPI_SEEK_SET),
-@@ -493,17 +585,17 @@ static IOR_offset_t SeekOffset(MPI_File fd, IOR_offset_t offset,
+@@ -493,17 +576,17 @@ static IOR_offset_t SeekOffset(MPI_File fd, IOR_offset_t offset,
   * Use MPI_File_get_size() to return aggregate file size.
   * NOTE: This function is used by the HDF5 and NCMPI backends.
   */
@@ -5468,7 +5972,7 @@ index 04c10be..070cff0 100755
                  comm = MPI_COMM_SELF;
          } else {
                  comm = testComm;
-@@ -519,26 +611,5 @@ IOR_offset_t MPIIO_GetFileSize(IOR_param_t * test, MPI_Comm testComm,
+@@ -519,26 +602,5 @@ IOR_offset_t MPIIO_GetFileSize(IOR_param_t * test, MPI_Comm testComm,
          if (mpiHints != MPI_INFO_NULL)
                  MPI_CHECK(MPI_Info_free(&mpiHints), "MPI_Info_free failed");
  
@@ -5496,23 +6000,39 @@ index 04c10be..070cff0 100755
          return (aggFileSizeFromStat);
  }
 diff --git a/src/aiori-NCMPI.c b/src/aiori-NCMPI.c
-index 5fc1375..b6ab84b 100755
+index 5fc1375..b098470 100755
 --- a/src/aiori-NCMPI.c
 +++ b/src/aiori-NCMPI.c
-@@ -45,20 +45,57 @@
+@@ -32,33 +32,73 @@
+  * NCMPI_CHECK will display a custom error message and then exit the program
+  */
+ #define NCMPI_CHECK(NCMPI_RETURN, MSG) do {                              \
++    int _NCMPI_RETURN = (NCMPI_RETURN);                                  \
+                                                                          \
+-    if (NCMPI_RETURN < 0) {                                              \
++    if (_NCMPI_RETURN != NC_NOERR) {                                     \
+         fprintf(stdout, "** error **\n");                                \
+         fprintf(stdout, "ERROR in %s (line %d): %s.\n",                  \
+                 __FILE__, __LINE__, MSG);                                \
+-        fprintf(stdout, "ERROR: %s.\n", ncmpi_strerror(NCMPI_RETURN));   \
++        fprintf(stdout, "ERROR: %s.\n", ncmpi_strerror(_NCMPI_RETURN));  \
+         fprintf(stdout, "** exiting **\n");                              \
+-        exit(-1);                                                        \
++        exit(EXIT_FAILURE);                                              \
+     }                                                                    \
+ } while(0)
  
  /**************************** P R O T O T Y P E S *****************************/
  
 -static int GetFileMode(IOR_param_t *);
--
++static int GetFileMode(int flags);
+ 
 -static void *NCMPI_Create(char *, IOR_param_t *);
 -static void *NCMPI_Open(char *, IOR_param_t *);
 -static IOR_offset_t NCMPI_Xfer(int, void *, IOR_size_t *,
 -                               IOR_offset_t, IOR_param_t *);
 -static void NCMPI_Close(void *, IOR_param_t *);
 -static void NCMPI_Delete(char *, IOR_param_t *);
-+static int GetFileMode(int flags);
-+
 +static aiori_fd_t *NCMPI_Create(char *, int iorflags, aiori_mod_opt_t *);
 +static aiori_fd_t *NCMPI_Open(char *, int iorflags, aiori_mod_opt_t *);
 +static IOR_offset_t NCMPI_Xfer(int, aiori_fd_t *, IOR_size_t *,
@@ -5537,8 +6057,7 @@ index 5fc1375..b6ab84b 100755
 +}
 +
 +typedef struct {
-+  int showHints;                   /* show hints */
-+  char * hintsFileName;            /* full name for hints file */
++  mpiio_options_t mpio;
 +
 +  /* runtime variables */
 +  int var_id;                      /* variable id handle for data set */
@@ -5557,8 +6076,11 @@ index 5fc1375..b6ab84b 100755
 +  *init_backend_options = (aiori_mod_opt_t*) o;
 +
 +  option_help h [] = {
-+    {0, "mpiio.hintsFileName","Full name for hints file", OPTION_OPTIONAL_ARGUMENT, 's', & o->hintsFileName},
-+    {0, "mpiio.showHints",    "Show MPI hints", OPTION_FLAG, 'd', & o->showHints},
++    {0, "ncmpi.hintsFileName","Full name for hints file", OPTION_OPTIONAL_ARGUMENT, 's', & o->mpio.hintsFileName},
++    {0, "ncmpi.showHints",    "Show MPI hints", OPTION_FLAG, 'd', & o->mpio.showHints},
++    {0, "ncmpi.preallocate",   "Preallocate file size", OPTION_FLAG, 'd', & o->mpio.preallocate},
++    {0, "ncmpi.useStridedDatatype", "put strided access into datatype", OPTION_FLAG, 'd', & o->mpio.useStridedDatatype},
++    {0, "ncmpi.useFileView",  "Use MPI_File_set_view", OPTION_FLAG, 'd', & o->mpio.useFileView},
 +    LAST_OPTION
 +  };
 +  option_help * help = malloc(sizeof(h));
@@ -5568,7 +6090,7 @@ index 5fc1375..b6ab84b 100755
  
  ior_aiori_t ncmpi_aiori = {
          .name = "NCMPI",
-@@ -76,6 +113,8 @@ ior_aiori_t ncmpi_aiori = {
+@@ -76,6 +116,8 @@ ior_aiori_t ncmpi_aiori = {
          .rmdir = aiori_posix_rmdir,
          .access = NCMPI_Access,
          .stat = aiori_posix_stat,
@@ -5577,7 +6099,7 @@ index 5fc1375..b6ab84b 100755
  };
  
  /***************************** F U N C T I O N S ******************************/
-@@ -83,15 +122,16 @@ ior_aiori_t ncmpi_aiori = {
+@@ -83,15 +125,16 @@ ior_aiori_t ncmpi_aiori = {
  /*
   * Create and open a file through the NCMPI interface.
   */
@@ -5592,12 +6114,12 @@ index 5fc1375..b6ab84b 100755
          /* read and set MPI file hints from hintsFile */
 -        SetHints(&mpiHints, param->hintsFileName);
 -        if (rank == 0 && param->showHints) {
-+        SetHints(&mpiHints, o->hintsFileName);
-+        if (rank == 0 && o->showHints) {
++        SetHints(&mpiHints, o->mpio.hintsFileName);
++        if (rank == 0 && o->mpio.showHints) {
                  fprintf(stdout, "\nhints passed to MPI_File_open() {\n");
                  ShowHints(&mpiHints);
                  fprintf(stdout, "}\n");
-@@ -101,7 +141,7 @@ static void *NCMPI_Create(char *testFileName, IOR_param_t * param)
+@@ -101,7 +144,7 @@ static void *NCMPI_Create(char *testFileName, IOR_param_t * param)
          if (fd == NULL)
                  ERR("malloc() failed");
  
@@ -5606,16 +6128,20 @@ index 5fc1375..b6ab84b 100755
          NCMPI_CHECK(ncmpi_create(testComm, testFileName, fd_mode,
                                   mpiHints, fd), "cannot create file");
  
-@@ -111,7 +151,7 @@ static void *NCMPI_Create(char *testFileName, IOR_param_t * param)
+@@ -111,10 +154,9 @@ static void *NCMPI_Create(char *testFileName, IOR_param_t * param)
  
  #if defined(PNETCDF_VERSION_MAJOR) && (PNETCDF_VERSION_MAJOR > 1 || PNETCDF_VERSION_MINOR >= 2)
          /* ncmpi_get_file_info is first available in 1.2.0 */
 -        if (rank == 0 && param->showHints) {
-+        if (rank == 0 && o->showHints) {
++        if (rank == 0 && o->mpio.showHints) {
              MPI_Info info_used;
-             MPI_CHECK(ncmpi_get_file_info(*fd, &info_used),
-                       "cannot inquire file info");
-@@ -123,21 +163,22 @@ static void *NCMPI_Create(char *testFileName, IOR_param_t * param)
+-            MPI_CHECK(ncmpi_get_file_info(*fd, &info_used),
+-                      "cannot inquire file info");
++            NCMPI_CHECK(ncmpi_get_file_info(*fd, &info_used), "cannot inquire file info");
+             /* print the MPI file hints currently used */
+             fprintf(stdout, "\nhints returned from opened file {\n");
+             ShowHints(&info_used);
+@@ -123,21 +165,22 @@ static void *NCMPI_Create(char *testFileName, IOR_param_t * param)
          }
  #endif
  
@@ -5637,12 +6163,12 @@ index 5fc1375..b6ab84b 100755
          /* read and set MPI file hints from hintsFile */
 -        SetHints(&mpiHints, param->hintsFileName);
 -        if (rank == 0 && param->showHints) {
-+        SetHints(&mpiHints, o->hintsFileName);
-+        if (rank == 0 && o->showHints) {
++        SetHints(&mpiHints, o->mpio.hintsFileName);
++        if (rank == 0 && o->mpio.showHints) {
                  fprintf(stdout, "\nhints passed to MPI_File_open() {\n");
                  ShowHints(&mpiHints);
                  fprintf(stdout, "}\n");
-@@ -147,7 +188,7 @@ static void *NCMPI_Open(char *testFileName, IOR_param_t * param)
+@@ -147,7 +190,7 @@ static void *NCMPI_Open(char *testFileName, IOR_param_t * param)
          if (fd == NULL)
                  ERR("malloc() failed");
  
@@ -5651,16 +6177,16 @@ index 5fc1375..b6ab84b 100755
          NCMPI_CHECK(ncmpi_open(testComm, testFileName, fd_mode,
                                 mpiHints, fd), "cannot open file");
  
-@@ -157,7 +198,7 @@ static void *NCMPI_Open(char *testFileName, IOR_param_t * param)
+@@ -157,7 +200,7 @@ static void *NCMPI_Open(char *testFileName, IOR_param_t * param)
  
  #if defined(PNETCDF_VERSION_MAJOR) && (PNETCDF_VERSION_MAJOR > 1 || PNETCDF_VERSION_MINOR >= 2)
          /* ncmpi_get_file_info is first available in 1.2.0 */
 -        if (rank == 0 && param->showHints) {
-+        if (rank == 0 && o->showHints) {
++        if (rank == 0 && o->mpio.showHints) {
              MPI_Info info_used;
              MPI_CHECK(ncmpi_get_file_info(*fd, &info_used),
                        "cannot inquire file info");
-@@ -169,51 +210,43 @@ static void *NCMPI_Open(char *testFileName, IOR_param_t * param)
+@@ -169,51 +212,43 @@ static void *NCMPI_Open(char *testFileName, IOR_param_t * param)
          }
  #endif
  
@@ -5724,7 +6250,7 @@ index 5fc1375..b6ab84b 100755
  
                          /* reshape 1D array to 3D array:
                             [segmentCount*numTasks][numTransfers][transferSize]
-@@ -229,7 +262,7 @@ static IOR_offset_t NCMPI_Xfer(int access, void *fd, IOR_size_t * buffer,
+@@ -229,7 +264,7 @@ static IOR_offset_t NCMPI_Xfer(int access, void *fd, IOR_size_t * buffer,
                                      "cannot define data set dimensions");
                          NCMPI_CHECK(ncmpi_def_dim
                                      (*(int *)fd, "transfer_size",
@@ -5733,7 +6259,7 @@ index 5fc1375..b6ab84b 100755
                                      "cannot define data set dimensions");
                          NCMPI_CHECK(ncmpi_def_var
                                      (*(int *)fd, "data_var", NC_BYTE, NUM_DIMS,
-@@ -244,77 +277,72 @@ static IOR_offset_t NCMPI_Xfer(int access, void *fd, IOR_size_t * buffer,
+@@ -244,80 +279,72 @@ static IOR_offset_t NCMPI_Xfer(int access, void *fd, IOR_size_t * buffer,
                                      "cannot retrieve data set variable");
                  }
  
@@ -5818,6 +6344,7 @@ index 5fc1375..b6ab84b 100755
 +static void NCMPI_Fsync(aiori_fd_t *fd, aiori_mod_opt_t * param)
  {
 -        ;
++        NCMPI_CHECK(ncmpi_sync(*(int *)fd), "cannot sync file");
  }
  
  /*
@@ -5827,20 +6354,25 @@ index 5fc1375..b6ab84b 100755
 +static void NCMPI_Close(aiori_fd_t *fd, aiori_mod_opt_t * param)
  {
 -        if (param->collective == FALSE) {
-+        if (hints->collective == FALSE) {
-                 NCMPI_CHECK(ncmpi_end_indep_data(*(int *)fd),
-                             "cannot disable independent data mode");
-         }
-@@ -325,7 +353,7 @@ static void NCMPI_Close(void *fd, IOR_param_t * param)
+-                NCMPI_CHECK(ncmpi_end_indep_data(*(int *)fd),
+-                            "cannot disable independent data mode");
+-        }
+         NCMPI_CHECK(ncmpi_close(*(int *)fd), "cannot close file");
+         free(fd);
+ }
+@@ -325,9 +352,9 @@ static void NCMPI_Close(void *fd, IOR_param_t * param)
  /*
   * Delete a file through the NCMPI interface.
   */
 -static void NCMPI_Delete(char *testFileName, IOR_param_t * param)
 +static void NCMPI_Delete(char *testFileName, aiori_mod_opt_t * param)
  {
-         return(MPIIO_Delete(testFileName, param));
+-        return(MPIIO_Delete(testFileName, param));
++        NCMPI_CHECK(ncmpi_delete(testFileName, MPI_INFO_NULL), "cannot delete file");
  }
-@@ -341,35 +369,35 @@ static char* NCMPI_GetVersion()
+ 
+ /*
+@@ -341,39 +368,39 @@ static char* NCMPI_GetVersion()
  /*
   * Return the correct file mode for NCMPI.
   */
@@ -5881,7 +6413,7 @@ index 5fc1375..b6ab84b 100755
 -        if (param->openFlags & IOR_TRUNC) {
 -                fprintf(stdout, "File truncation not implemented in NCMPI\n");
 +        if (flags & IOR_TRUNC) {
-+            WARN("File truncation not implemented in NCMPI");
++                fd_mode |= NC_CLOBBER;
          }
 -        if (param->openFlags & IOR_DIRECT) {
 -                fprintf(stdout, "O_DIRECT not implemented in NCMPI\n");
@@ -5889,8 +6421,14 @@ index 5fc1375..b6ab84b 100755
 +            WARN("O_DIRECT not implemented in NCMPI");
          }
  
-         /* to enable > 4GB file size */
-@@ -381,16 +409,16 @@ static int GetFileMode(IOR_param_t * param)
+-        /* to enable > 4GB file size */
+-        fd_mode |= NC_64BIT_OFFSET;
++        /* to enable > 4GB variable size */
++        fd_mode |= NC_64BIT_DATA;
+ 
+         return (fd_mode);
+ }
+@@ -381,16 +408,16 @@ static int GetFileMode(IOR_param_t * param)
  /*
   * Use MPIIO call to get file size.
   */
@@ -6160,19 +6698,43 @@ index 0000000..79b41b4
 +    return(aggFileSizeFromStat);
 +} /* PMDK_GetFileSize() */
 diff --git a/src/aiori-POSIX.c b/src/aiori-POSIX.c
-index 463a9c8..0f2c545 100755
+index 463a9c8..67ea4a8 100755
 --- a/src/aiori-POSIX.c
 +++ b/src/aiori-POSIX.c
-@@ -34,7 +34,7 @@
+@@ -32,11 +32,14 @@
+ #include <assert.h>
  
- #ifdef HAVE_LINUX_LUSTRE_LUSTRE_USER_H
- #  include <linux/lustre/lustre_user.h>
+ 
+-#ifdef HAVE_LINUX_LUSTRE_LUSTRE_USER_H
+-#  include <linux/lustre/lustre_user.h>
 -#elif defined(HAVE_LUSTRE_LUSTRE_USER_H)
-+#elif defined(HAVE_LUSTRE_USER)
- #  include <lustre/lustre_user.h>
- #endif
+-#  include <lustre/lustre_user.h>
+-#endif
++#ifdef HAVE_LUSTRE_USER
++#  ifdef HAVE_LINUX_LUSTRE_LUSTRE_USER_H
++#    include <linux/lustre/lustre_user.h>
++#  elif defined(HAVE_LUSTRE_LUSTRE_USER_H)
++#    include <lustre/lustre_user.h>
++#  endif
++#endif /* HAVE_LUSTRE_USER */
++
  #ifdef HAVE_GPFS_H
-@@ -55,6 +55,22 @@
+ #  include <gpfs.h>
+ #endif
+@@ -45,9 +48,9 @@
+ #endif
+ 
+ #ifdef HAVE_BEEGFS_BEEGFS_H
+-#include <beegfs/beegfs.h>
+-#include <dirent.h>
+-#include <libgen.h>
++#  include <beegfs/beegfs.h>
++#  include <dirent.h>
++#  include <libgen.h>
+ #endif
+ 
+ #include "ior.h"
+@@ -55,6 +58,22 @@
  #include "iordef.h"
  #include "utilities.h"
  
@@ -6180,8 +6742,8 @@ index 463a9c8..0f2c545 100755
 +
 +#ifdef HAVE_GPU_DIRECT
 +typedef long long loff_t;
-+#include <cuda_runtime.h>
-+#include <cufile.h>
++#  include <cuda_runtime.h>
++#  include <cufile.h>
 +#endif
 +
 +typedef struct {
@@ -6195,7 +6757,7 @@ index 463a9c8..0f2c545 100755
  #ifndef   open64                /* necessary for TRU64 -- */
  #  define open64  open            /* unlikely, but may pose */
  #endif  /* not open64 */                        /* conflicting prototypes */
-@@ -67,32 +83,69 @@
+@@ -67,32 +86,73 @@
  #  define O_BINARY 0
  #endif
  
@@ -6224,7 +6786,7 @@ index 463a9c8..0f2c545 100755
 +  };
 +  CUfileError_t status = cuFileHandleRegister(& pfd->cf_handle, & cf_descr);
 +  if(status.err != CU_FILE_SUCCESS){
-+    EWARNF("Could not register handle %s", cuFileGetErrorString(status));
++    WARNF("Could not register handle %s", cuFileGetErrorString(status));
 +  }
 +}
 +#endif
@@ -6263,6 +6825,10 @@ index 463a9c8..0f2c545 100755
 +#ifdef HAVE_GPFS_FCNTL_H
 +    {0, "posix.gpfs.hintaccess", "", OPTION_FLAG, 'd', & o->gpfs_hint_access},
 +    {0, "posix.gpfs.releasetoken", "", OPTION_OPTIONAL_ARGUMENT, 'd', & o->gpfs_release_token},
++#ifdef HAVE_GPFSFINEGRAINWRITESHARING_T
++    {0, "posix.gpfs.finegrainwritesharing", "    Enable fine grain write sharing", OPTION_FLAG, 'd', & o->gpfs_finegrain_writesharing},
++    {0, "posix.gpfs.finegrainreadsharing", "     Enable fine grain read sharing", OPTION_FLAG, 'd', & o->gpfs_finegrain_readsharing},
++#endif
 +
 +#endif
 +#ifdef HAVE_LUSTRE_USER
@@ -6270,14 +6836,14 @@ index 463a9c8..0f2c545 100755
 +    {0, "posix.lustre.stripesize", "", OPTION_OPTIONAL_ARGUMENT, 'd', & o->lustre_stripe_size},
 +    {0, "posix.lustre.startost", "", OPTION_OPTIONAL_ARGUMENT, 'd', & o->lustre_start_ost},
 +    {0, "posix.lustre.ignorelocks", "", OPTION_FLAG, 'd', & o->lustre_ignore_locks},
-+#endif
++#endif /* HAVE_LUSTRE_USER */
 +#ifdef HAVE_GPU_DIRECT
 +    {0, "gpuDirect",        "allocate I/O buffers on the GPU", OPTION_FLAG, 'd', & o->gpuDirect},
 +#endif
      LAST_OPTION
    };
    option_help * help = malloc(sizeof(h));
-@@ -107,27 +160,54 @@ option_help * POSIX_options(void ** init_backend_options, void * init_values){
+@@ -107,27 +167,54 @@ option_help * POSIX_options(void ** init_backend_options, void * init_values){
  ior_aiori_t posix_aiori = {
          .name = "POSIX",
          .name_legacy = NULL,
@@ -6333,8 +6899,12 @@ index 463a9c8..0f2c545 100755
  
  #ifdef HAVE_GPFS_FCNTL_H
  void gpfs_free_all_locks(int fd)
-@@ -151,7 +231,7 @@ void gpfs_free_all_locks(int fd)
-                 EWARNF("gpfs_fcntl(%d, ...) release all locks hint failed.", fd);
+@@ -148,10 +235,10 @@ void gpfs_free_all_locks(int fd)
+ 
+         rc = gpfs_fcntl(fd, &release_all);
+         if (verbose >= VERBOSE_0 && rc != 0) {
+-                EWARNF("gpfs_fcntl(%d, ...) release all locks hint failed.", fd);
++                WARNF("gpfs_fcntl(%d, ...) release all locks hint failed.", fd);
          }
  }
 -void gpfs_access_start(int fd, IOR_offset_t length, IOR_param_t *param, int access)
@@ -6342,7 +6912,7 @@ index 463a9c8..0f2c545 100755
  {
          int rc;
          struct {
-@@ -165,7 +245,7 @@ void gpfs_access_start(int fd, IOR_offset_t length, IOR_param_t *param, int acce
+@@ -165,17 +252,17 @@ void gpfs_access_start(int fd, IOR_offset_t length, IOR_param_t *param, int acce
  
          take_locks.access.structLen = sizeof(take_locks.access);
          take_locks.access.structType = GPFS_ACCESS_RANGE;
@@ -6351,7 +6921,10 @@ index 463a9c8..0f2c545 100755
          take_locks.access.length = length;
          take_locks.access.isWrite = (access == WRITE);
  
-@@ -175,7 +255,7 @@ void gpfs_access_start(int fd, IOR_offset_t length, IOR_param_t *param, int acce
+         rc = gpfs_fcntl(fd, &take_locks);
+         if (verbose >= VERBOSE_2 && rc != 0) {
+-                EWARNF("gpfs_fcntl(%d, ...) access range hint failed.", fd);
++                WARNF("gpfs_fcntl(%d, ...) access range hint failed.", fd);
          }
  }
  
@@ -6360,7 +6933,7 @@ index 463a9c8..0f2c545 100755
  {
          int rc;
          struct {
-@@ -190,7 +270,7 @@ void gpfs_access_end(int fd, IOR_offset_t length, IOR_param_t *param, int access
+@@ -190,15 +277,70 @@ void gpfs_access_end(int fd, IOR_offset_t length, IOR_param_t *param, int access
  
          free_locks.free.structLen = sizeof(free_locks.free);
          free_locks.free.structType = GPFS_FREE_RANGE;
@@ -6369,9 +6942,86 @@ index 463a9c8..0f2c545 100755
          free_locks.free.length = length;
  
          rc = gpfs_fcntl(fd, &free_locks);
-@@ -316,89 +396,79 @@ bool beegfs_createFilePath(char* filepath, mode_t mode, int numTargets, int chun
+         if (verbose >= VERBOSE_2 && rc != 0) {
+-                EWARNF("gpfs_fcntl(%d, ...) free range hint failed.", fd);
++                WARNF("gpfs_fcntl(%d, ...) free range hint failed.", fd);
+         }
+ }
+ 
++#ifdef HAVE_GPFSFINEGRAINWRITESHARING_T
++/* This hint optimizes the performance of small strided
++   writes to a shared file from a parallel application */
++void gpfs_fineGrainWriteSharing(int fd)
++{
++        struct
++        {
++                gpfsFcntlHeader_t header;
++                gpfsFineGrainWriteSharing_t write;
++        } sharingHint;
++        int rc;
++
++        sharingHint.header.totalLength = sizeof(sharingHint);
++        sharingHint.header.fcntlVersion = GPFS_FCNTL_CURRENT_VERSION;
++        sharingHint.header.fcntlReserved = 0;
++
++        sharingHint.write.structLen = sizeof(sharingHint.write);
++        sharingHint.write.structType = GPFS_FINE_GRAIN_WRITE_SHARING;
++        sharingHint.write.fineGrainWriteSharing = 1;
++        sharingHint.write.taskId = -1;
++        sharingHint.write.totalTasks =  -1;
++        sharingHint.write.recordSize =  -1;
++
++        rc = gpfs_fcntl(fd, &sharingHint);
++        if (verbose >= VERBOSE_2 && rc != 0) {
++                WARNF("gpfs_fcntl(%d, ...) fine grain write sharing hint failed.", fd);
++        }
++}
++
++/* This hint optimizes the performance of small strided
++   reads from a shared file from a parallel application */
++void gpfs_fineGrainReadSharing(int fd)
++{
++        struct
++        {
++                gpfsFcntlHeader_t header;
++                gpfsPrefetch_t read;
++        } sharingHint;
++        int rc;
++
++        sharingHint.header.totalLength = sizeof(sharingHint);
++        sharingHint.header.fcntlVersion = GPFS_FCNTL_CURRENT_VERSION;
++        sharingHint.header.fcntlReserved = 0;
++
++        sharingHint.read.structLen = sizeof(sharingHint.read);
++        sharingHint.read.structType = GPFS_PREFETCH;
++        sharingHint.read.prefetchEnableRead = 0;
++        sharingHint.read.prefetchEnableWrite = 1;
++
++        rc = gpfs_fcntl(fd, &sharingHint);
++        if (verbose >= VERBOSE_2 && rc != 0) {
++                WARNF("gpfs_fcntl(%d, ...) fine grain read sharing hint failed.", fd);
++        }
++}
++#endif
+ #endif
+ 
+ #ifdef HAVE_BEEGFS_BEEGFS_H
+@@ -315,126 +457,138 @@ bool beegfs_createFilePath(char* filepath, mode_t mode, int numTargets, int chun
+ #endif /* HAVE_BEEGFS_BEEGFS_H */
  
  
++#ifdef HAVE_LUSTRE_USER
++void lustre_disable_file_locks(const int fd) {
++        int lustre_ioctl_flags = LL_FILE_IGNORE_LOCK;
++        if (verbose >= VERBOSE_1) {
++                INFO("** Disabling lustre range locking **\n");
++        }
++        if (ioctl(fd, LL_IOC_SETFLAGS, &lustre_ioctl_flags) == -1) {
++                ERRF("ioctl(%d, LL_IOC_SETFLAGS, ...) failed", fd);
++        }
++}
++#endif /* HAVE_LUSTRE_USER */
++
  /*
 - * Creat and open a file through the POSIX interface.
 + * Create and open a file through the POSIX interface.
@@ -6475,7 +7125,7 @@ index 463a9c8..0f2c545 100755
                  }
          } else {
 -#endif                          /* HAVE_LUSTRE_LUSTRE_USER_H */
-+#endif                          /* HAVE_LUSTRE_USER */
++#endif /* HAVE_LUSTRE_USER */
  
                  fd_oflag |= O_CREAT | O_RDWR;
  
@@ -6493,7 +7143,9 @@ index 463a9c8..0f2c545 100755
                      if (result) {
                         fd_oflag &= ~O_CREAT;
                      } else {
-@@ -407,34 +477,40 @@ void *POSIX_Create(char *testFileName, IOR_param_t * param)
+-                       EWARN("BeeGFS tuning failed");
++                       WARN("BeeGFS tuning failed");
+                     }
                   }
  #endif /* HAVE_BEEGFS_BEEGFS_H */
  
@@ -6512,15 +7164,14 @@ index 463a9c8..0f2c545 100755
          }
  
 -        if (param->lustre_ignore_locks) {
-+        if (o->lustre_ignore_locks) {
-                 int lustre_ioctl_flags = LL_FILE_IGNORE_LOCK;
+-                int lustre_ioctl_flags = LL_FILE_IGNORE_LOCK;
 -                if (ioctl(*fd, LL_IOC_SETFLAGS, &lustre_ioctl_flags) == -1)
 -                        ERRF("ioctl(%d, LL_IOC_SETFLAGS, ...) failed", *fd);
-+                if (ioctl(pfd->fd, LL_IOC_SETFLAGS, &lustre_ioctl_flags) == -1)
-+                        ERRF("ioctl(%d, LL_IOC_SETFLAGS, ...) failed", pfd->fd);
++        if (o->lustre_ignore_locks) {
++                lustre_disable_file_locks(pfd->fd);
          }
 -#endif                          /* HAVE_LUSTRE_LUSTRE_USER_H */
-+#endif                          /* HAVE_LUSTRE_USER */
++#endif /* HAVE_LUSTRE_USER */
  
  #ifdef HAVE_GPFS_FCNTL_H
          /* in the single shared file case, immediately release all locks, with
@@ -6530,9 +7181,15 @@ index 463a9c8..0f2c545 100755
 -                gpfs_free_all_locks(*fd);
 +        if (o->gpfs_release_token ) {
 +                gpfs_free_all_locks(pfd->fd);
++        }
++#ifdef HAVE_GPFSFINEGRAINWRITESHARING_T
++        /* Enable fine grain write sharing */
++        if (o->gpfs_finegrain_writesharing) {
++                gpfs_fineGrainWriteSharing(pfd->fd);
          }
  #endif
 -        return ((void *)fd);
++#endif
 +#ifdef HAVE_GPU_DIRECT
 +  if(o->gpuDirect){
 +    init_cufile(pfd);
@@ -6547,7 +7204,7 @@ index 463a9c8..0f2c545 100755
   */
  int POSIX_Mknod(char *testFileName)
  {
-@@ -450,99 +526,121 @@ int POSIX_Mknod(char *testFileName)
+@@ -450,99 +604,122 @@ int POSIX_Mknod(char *testFileName)
  /*
   * Open a file through the POSIX interface.
   */
@@ -6577,36 +7234,34 @@ index 463a9c8..0f2c545 100755
 +        }
  
 -        fd_oflag |= O_RDWR;
--
--        if(param->dryRun)
--          return 0;
 +        if(hints->dryRun)
 +          return (aiori_fd_t*) 0;
  
--        *fd = open64(testFileName, fd_oflag);
--        if (*fd < 0)
--                ERRF("open64(\"%s\", %d) failed", testFileName, fd_oflag);
+-        if(param->dryRun)
+-          return 0;
 +        pfd->fd = open64(testFileName, fd_oflag);
 +        if (pfd->fd < 0)
 +                ERRF("open64(\"%s\", %d) failed: %s", testFileName, fd_oflag, strerror(errno));
  
+-        *fd = open64(testFileName, fd_oflag);
+-        if (*fd < 0)
+-                ERRF("open64(\"%s\", %d) failed", testFileName, fd_oflag);
+-
 -#ifdef HAVE_LUSTRE_LUSTRE_USER_H
 -        if (param->lustre_ignore_locks) {
-+#ifdef HAVE_LUSTRE_USER
-+        if (o->lustre_ignore_locks) {
-                 int lustre_ioctl_flags = LL_FILE_IGNORE_LOCK;
-                 if (verbose >= VERBOSE_1) {
+-                int lustre_ioctl_flags = LL_FILE_IGNORE_LOCK;
+-                if (verbose >= VERBOSE_1) {
 -                        fprintf(stdout,
 -                                "** Disabling lustre range locking **\n");
-+                        EINFO("** Disabling lustre range locking **\n", 0);
-                 }
+-                }
 -                if (ioctl(*fd, LL_IOC_SETFLAGS, &lustre_ioctl_flags) == -1)
 -                        ERRF("ioctl(%d, LL_IOC_SETFLAGS, ...) failed", *fd);
-+                if (ioctl(pfd->fd, LL_IOC_SETFLAGS, &lustre_ioctl_flags) == -1)
-+                        ERRF("ioctl(%d, LL_IOC_SETFLAGS, ...) failed", pfd->fd);
++#ifdef HAVE_LUSTRE_USER
++        if (o->lustre_ignore_locks) {
++                lustre_disable_file_locks(pfd->fd);
          }
 -#endif                          /* HAVE_LUSTRE_LUSTRE_USER_H */
-+#endif                          /* HAVE_LUSTRE_USER */
++#endif /* HAVE_LUSTRE_USER */
  
  #ifdef HAVE_GPFS_FCNTL_H
 -        if(param->gpfs_release_token) {
@@ -6614,13 +7269,19 @@ index 463a9c8..0f2c545 100755
 +        if(o->gpfs_release_token) {
 +                gpfs_free_all_locks(pfd->fd);
 +        }
++#ifdef HAVE_GPFSFINEGRAINWRITESHARING_T
++        /* Enable fine grain read sharing */
++        if (o->gpfs_finegrain_readsharing) {
++                gpfs_fineGrainReadSharing(pfd->fd);
+         }
+ #endif
+-        return ((void *)fd);
 +#endif
 +#ifdef HAVE_GPU_DIRECT
 +        if(o->gpuDirect){
 +          init_cufile(pfd);
-         }
- #endif
--        return ((void *)fd);
++        }
++#endif
 +        return (aiori_fd_t*) pfd;
  }
  
@@ -6669,12 +7330,11 @@ index 463a9c8..0f2c545 100755
                          if (verbose >= VERBOSE_4) {
 -                                fprintf(stdout,
 -                                        "task %d writing to offset %lld\n",
-+                                EINFO("task %d writing to offset %lld\n",
++                                INFOF("task %d writing to offset %lld\n",
                                          rank,
 -                                        param->offset + length - remaining);
 +                                        offset + length - remaining);
-                         }
--                        rc = write(fd, ptr, remaining);
++                        }
 +#ifdef HAVE_GPU_DIRECT
 +                        if(o->gpuDirect){
 +                          rc = cuFileWrite(pfd->cf_handle, ptr, remaining, offset + mem_offset, mem_offset);
@@ -6682,7 +7342,8 @@ index 463a9c8..0f2c545 100755
 +#endif
 +                          rc = write(fd, ptr, remaining);
 +#ifdef HAVE_GPU_DIRECT
-+                        }
+                         }
+-                        rc = write(fd, ptr, remaining);
 +#endif
                          if (rc == -1)
                                  ERRF("write(%d, %p, %lld) failed",
@@ -6696,7 +7357,7 @@ index 463a9c8..0f2c545 100755
                          if (verbose >= VERBOSE_4) {
 -                                fprintf(stdout,
 -                                        "task %d reading from offset %lld\n",
-+                                EINFO("task %d reading from offset %lld\n",
++                                INFOF("task %d reading from offset %lld\n",
                                          rank,
 -                                        param->offset + length - remaining);
 +                                        offset + length - remaining);
@@ -6714,13 +7375,13 @@ index 463a9c8..0f2c545 100755
                          if (rc == 0)
                                  ERRF("read(%d, %p, %lld) returned EOF prematurely",
                                          fd, (void*)ptr, remaining);
-@@ -551,43 +649,38 @@ static IOR_offset_t POSIX_Xfer(int access, void *file, IOR_size_t * buffer,
+@@ -551,43 +728,38 @@ static IOR_offset_t POSIX_Xfer(int access, void *file, IOR_size_t * buffer,
                                          fd, (void*)ptr, remaining);
                  }
                  if (rc < remaining) {
 -                        fprintf(stdout,
 -                                "WARNING: Task %d, partial %s, %lld of %lld bytes at offset %lld\n",
-+                        EWARNF("task %d, partial %s, %lld of %lld bytes at offset %lld\n",
++                        WARNF("task %d, partial %s, %lld of %lld bytes at offset %lld\n",
                                  rank,
                                  access == WRITE ? "write()" : "read()",
                                  rc, remaining,
@@ -6760,7 +7421,7 @@ index 463a9c8..0f2c545 100755
 -                EWARNF("fsync(%d) failed", *(int *)fd);
 +    int fd = ((posix_fd*) afd)->fd;
 +    if (fsync(fd) != 0)
-+        EWARNF("fsync(%d) failed", fd);
++        WARNF("fsync(%d) failed", fd);
  }
  
  
@@ -6769,7 +7430,7 @@ index 463a9c8..0f2c545 100755
  {
    int ret = system("sync");
    if (ret != 0){
-@@ -599,35 +692,52 @@ static void POSIX_Sync(IOR_param_t * param)
+@@ -599,35 +771,52 @@ static void POSIX_Sync(IOR_param_t * param)
  /*
   * Close a file through the POSIX interface.
   */
@@ -6807,7 +7468,7 @@ index 463a9c8..0f2c545 100755
          if (unlink(testFileName) != 0){
 -                EWARNF("[RANK %03d]: unlink() of file \"%s\" failed\n",
 -                       rank, testFileName);
-+                EWARNF("[RANK %03d]: unlink() of file \"%s\" failed", rank, testFileName);
++                WARNF("[RANK %03d]: unlink() of file \"%s\" failed", rank, testFileName);
          }
  }
  
@@ -6816,7 +7477,7 @@ index 463a9c8..0f2c545 100755
 +    return 0;
 +
 +  if(rename(oldfile, newfile) != 0){
-+    EWARNF("[RANK %03d]: rename() of file \"%s\" to  \"%s\" failed", rank, oldfile, newfile);
++    WARNF("[RANK %03d]: rename() of file \"%s\" to  \"%s\" failed", rank, oldfile, newfile);
 +    return -1;
 +  }
 +  return 0;
@@ -6834,7 +7495,7 @@ index 463a9c8..0f2c545 100755
            return 0;
          struct stat stat_buf;
          IOR_offset_t aggFileSizeFromStat, tmpMin, tmpMax, tmpSum;
-@@ -637,26 +747,17 @@ IOR_offset_t POSIX_GetFileSize(IOR_param_t * test, MPI_Comm testComm,
+@@ -637,26 +826,17 @@ IOR_offset_t POSIX_GetFileSize(IOR_param_t * test, MPI_Comm testComm,
          }
          aggFileSizeFromStat = stat_buf.st_size;
  
@@ -6875,10 +7536,10 @@ index 463a9c8..0f2c545 100755
 +}
 diff --git a/src/aiori-POSIX.h b/src/aiori-POSIX.h
 new file mode 100644
-index 0000000..b2f556a
+index 0000000..9a223b0
 --- /dev/null
 +++ b/src/aiori-POSIX.h
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,46 @@
 +#ifndef AIORI_POSIX_H
 +#define AIORI_POSIX_H
 +
@@ -6900,6 +7561,9 @@ index 0000000..b2f556a
 +  int gpfs_hint_access;          /* use gpfs "access range" hint */
 +  int gpfs_release_token;        /* immediately release GPFS tokens after
 +                                    creating or opening a file */
++  int gpfs_finegrain_writesharing;  /* Enable fine grain write sharing */
++  int gpfs_finegrain_readsharing;   /* Enable fine grain read sharing */
++
 +  /* beegfs variables */
 +  int beegfs_numTargets;           /* number storage targets to use */
 +  int beegfs_chunkSize;            /* srtipe pattern for new files */
@@ -6926,7 +7590,7 @@ diff --git a/src/aiori-S3.c b/src/aiori-S3-4c.c
 similarity index 74%
 rename from src/aiori-S3.c
 rename to src/aiori-S3-4c.c
-index 2c9a9af..6155ceb 100755
+index 2c9a9af..fa32837 100755
 --- a/src/aiori-S3.c
 +++ b/src/aiori-S3-4c.c
 @@ -91,16 +91,6 @@
@@ -7631,7 +8295,7 @@ index 2c9a9af..6155ceb 100755
  						fname, part_number, param->UploadId);
  
  			// For performance, we append <data_ptr> directly into the linked list
-@@ -838,16 +828,16 @@ S3_Xfer_internal(int          access,
+@@ -838,20 +828,20 @@ S3_Xfer_internal(int          access,
           //				}
           //			}
  
@@ -7658,6 +8322,11 @@ index 2c9a9af..6155ceb 100755
           if (strlen(param->io_buf->eTag) != ETAG_SIZE+2) { /* quotes at both ends */
  					fprintf(stderr, "Rank %d: ERROR: expected ETag to be %d hex digits\n",
  							  rank, ETAG_SIZE);
+-					exit(1);
++					exit(EXIT_FAILURE);
+          }
+ 
+ 			// save the eTag for later
 @@ -862,9 +852,9 @@ S3_Xfer_internal(int          access,
  								  param->io_buf->eTag +1,
  								  strlen(param->io_buf->eTag) -2);
@@ -8188,7 +8857,7 @@ index 2c9a9af..6155ceb 100755
  }
 diff --git a/src/aiori-S3-libs3.c b/src/aiori-S3-libs3.c
 new file mode 100644
-index 0000000..98d5df9
+index 0000000..fdb3aaf
 --- /dev/null
 +++ b/src/aiori-S3-libs3.c
 @@ -0,0 +1,586 @@
@@ -8347,7 +9016,7 @@ index 0000000..98d5df9
 +
 +#define CHECK_ERROR(p) \
 +if (s3status != S3StatusOK){ \
-+  EWARNF("S3 %s:%d (path:%s) \"%s\": %s %s", __FUNCTION__, __LINE__, p,  S3_get_status_name(s3status), s3error.message, s3error.furtherDetails ? s3error.furtherDetails : ""); \
++  WARNF("S3 %s:%d (path:%s) \"%s\": %s %s", __FUNCTION__, __LINE__, p,  S3_get_status_name(s3status), s3error.message, s3error.furtherDetails ? s3error.furtherDetails : ""); \
 +}
 +
 +
@@ -8780,10 +9449,10 @@ index 0000000..98d5df9
 +};
 diff --git a/src/aiori-aio.c b/src/aiori-aio.c
 new file mode 100644
-index 0000000..f9ee475
+index 0000000..fcf5dc7
 --- /dev/null
 +++ b/src/aiori-aio.c
-@@ -0,0 +1,258 @@
+@@ -0,0 +1,257 @@
 +/*
 + This backend uses linux-aio
 + Requires: libaio-dev
@@ -9025,7 +9694,6 @@ index 0000000..f9ee475
 +        .initialize = aio_initialize,
 +        .finalize = aio_finalize,
 +        .xfer_hints = aio_xfer_hints,
-+        .get_options = aio_options,
 +        .fsync = aio_Fsync,
 +        .open = aio_Open,
 +        .xfer = aio_Xfer,
@@ -9044,10 +9712,10 @@ index 0000000..f9ee475
 +};
 diff --git a/src/aiori-debug.h b/src/aiori-debug.h
 new file mode 100644
-index 0000000..32db28f
+index 0000000..9affb71
 --- /dev/null
 +++ b/src/aiori-debug.h
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,101 @@
 +#ifndef _AIORI_UTIL_H
 +#define _AIORI_UTIL_H
 +
@@ -9056,126 +9724,96 @@ index 0000000..32db28f
 +#include <stdio.h>
 +#include <mpi.h>
 +
++/* output log file */
 +extern FILE * out_logfile;
-+extern int verbose;                            /* verbose output */
++/* verbosity level */
++extern int verbose;
++/* treat warnings as errors */
++extern int aiori_warning_as_errors;
 +
 +#define FAIL(...) FailMessage(rank, ERROR_LOCATION, __VA_ARGS__)
 +void FailMessage(int rank, const char *location, char *format, ...);
 +
-+/******************************** M A C R O S *********************************/
-+
-+/******************************************************************************/
-+/*
-+ * WARN_RESET will display a custom error message and set value to default
-+ */
-+#define WARN_RESET(MSG, TO_STRUCT_PTR, FROM_STRUCT_PTR, MEMBER) do {     \
-+        (TO_STRUCT_PTR)->MEMBER = (FROM_STRUCT_PTR)->MEMBER;             \
-+        if (rank == 0) {                                                 \
-+            fprintf(out_logfile, "WARNING: %s.  Using value of %d.\n",    \
-+                    MSG, (TO_STRUCT_PTR)->MEMBER);                       \
-+        }                                                                \
-+        fflush(out_logfile);                                                  \
++/* display simple warning message and reset member value to default */
++#define WARN_RESET(MSG, TO_STRUCT_PTR, FROM_STRUCT_PTR, MEMBER) do {    \
++    (TO_STRUCT_PTR)->MEMBER = (FROM_STRUCT_PTR)->MEMBER;                \
++    if (rank == 0) {                                                    \
++        fprintf(out_logfile, "WARNING: %s. Using value of %d.\n",       \
++                MSG, (TO_STRUCT_PTR)->MEMBER);                          \
++    }                                                                   \
++    fflush(out_logfile);                                                \
 +} while (0)
 +
-+extern int aiori_warning_as_errors;
-+
-+#define WARN(MSG) do {                                                   \
-+        if(aiori_warning_as_errors){ ERR(MSG); }                           \
-+        if (verbose > VERBOSE_2) {                                       \
-+            fprintf(out_logfile, "WARNING: %s, (%s:%d).\n",               \
-+                    MSG, __FILE__, __LINE__);                            \
-+        } else {                                                         \
-+            fprintf(out_logfile, "WARNING: %s.\n", MSG);                  \
-+        }                                                                \
-+        fflush(out_logfile);                                                  \
++/* display warning message with format string */
++#define WARNF(FORMAT, ...) do {                                         \
++    if(aiori_warning_as_errors){                                        \
++        ERRF(FORMAT, __VA_ARGS__);                                      \
++    }                                                                   \
++    if (verbose > VERBOSE_2) {                                          \
++        fprintf(out_logfile, "WARNING: " FORMAT ", (%s:%d).\n",         \
++                __VA_ARGS__,  __FILE__, __LINE__);                      \
++    } else {                                                            \
++        fprintf(out_logfile, "WARNING: " FORMAT "\n",                   \
++                __VA_ARGS__);                                           \
++    }                                                                   \
++    fflush(out_logfile);                                                \
 +} while (0)
 +
-+
-+/* warning with format string and errno printed */
-+#define EWARNF(FORMAT, ...) do {                                         \
-+        if(aiori_warning_as_errors){ ERRF(FORMAT, __VA_ARGS__); }          \
-+        if (verbose > VERBOSE_2) {                                       \
-+            fprintf(out_logfile, "WARNING: " FORMAT ", (%s:%d).\n", \
-+                    __VA_ARGS__,  __FILE__, __LINE__); \
-+        } else {                                                         \
-+            fprintf(out_logfile, "WARNING: " FORMAT "\n",  \
-+                    __VA_ARGS__);                \
-+        }                                                                \
-+        fflush(out_logfile);                                                  \
++/* display simple warning message */
++#define WARN(MSG) do {                                                  \
++    WARNF("%s", MSG);                                                   \
 +} while (0)
 +
-+
-+/* warning with errno printed */
-+#define EWARN(MSG) do {                                                  \
-+        EWARNF("%s", MSG);                                               \
++/* display info message with format string */
++#define INFOF(FORMAT, ...) do {                                         \
++    if (verbose > VERBOSE_2) {                                          \
++        fprintf(out_logfile, "INFO: " FORMAT ", (%s:%d).\n",            \
++                __VA_ARGS__,  __FILE__, __LINE__);                      \
++    } else {                                                            \
++        fprintf(out_logfile, "INFO: " FORMAT "\n",                      \
++                __VA_ARGS__);                                           \
++    }                                                                   \
++    fflush(out_logfile);                                                \
 +} while (0)
 +
-+
-+/* warning with format string and errno printed */
-+#define EINFO(FORMAT, ...) do {                                         \
-+        if (verbose > VERBOSE_2) {                                       \
-+            fprintf(out_logfile, "INFO: " FORMAT ", (%s:%d).\n", \
-+                    __VA_ARGS__,  __FILE__, __LINE__); \
-+        } else {                                                         \
-+            fprintf(out_logfile, "INFO: " FORMAT "\n",  \
-+                    __VA_ARGS__);                \
-+        }                                                                \
-+        fflush(out_logfile);                                                  \
++/* display simple info message */
++#define INFO(MSG) do {                                                  \
++    INFOF("%s", MSG);                                                   \
 +} while (0)
 +
 +/* display error message with format string and terminate execution */
-+#define ERRF(FORMAT, ...) do {                                           \
-+        fprintf(out_logfile, "ERROR: " FORMAT ", (%s:%d)\n", \
-+                __VA_ARGS__, __FILE__, __LINE__); \
-+        fflush(out_logfile);                                                  \
-+        MPI_Abort(MPI_COMM_WORLD, -1);                                   \
++#define ERRF(FORMAT, ...) do {                                          \
++    fprintf(out_logfile, "ERROR: " FORMAT ", (%s:%d)\n",                \
++            __VA_ARGS__, __FILE__, __LINE__);                           \
++    fflush(out_logfile);                                                \
++    MPI_Abort(MPI_COMM_WORLD, -1);                                      \
 +} while (0)
 +
-+
-+/* display error message and terminate execution */
-+#define ERR_ERRNO(MSG) do {                                                    \
-+        ERRF("%s", MSG);                                                 \
++/* display simple error message and terminate execution */
++#define ERR(MSG) do {                                                   \
++    ERRF("%s", MSG);                                                    \
 +} while (0)
 +
-+
-+/* display a simple error message (i.e. errno is not set) and terminate execution */
-+#define ERR(MSG) do {                                            \
-+        fprintf(out_logfile, "ERROR: %s, (%s:%d)\n",                     \
-+                MSG, __FILE__, __LINE__);                               \
-+        fflush(out_logfile);                                                 \
++/* if MPI_STATUS indicates error, display error message with format */
++/* string and error string from MPI_STATUS and terminate execution */
++#define MPI_CHECKF(MPI_STATUS, FORMAT, ...) do {                        \
++    char resultString[MPI_MAX_ERROR_STRING];                            \
++    int resultLength;                                                   \
++    int _MPI_STATUS = (MPI_STATUS);                                     \
++                                                                        \
++    if (_MPI_STATUS != MPI_SUCCESS) {                                   \
++        MPI_Error_string(_MPI_STATUS, resultString, &resultLength);     \
++        fprintf(out_logfile, "ERROR: " FORMAT ", MPI %s, (%s:%d)\n",    \
++                __VA_ARGS__, resultString, __FILE__, __LINE__);         \
++        fflush(out_logfile);                                            \
 +        MPI_Abort(MPI_COMM_WORLD, -1);                                  \
-+} while (0)
-+
-+
-+/******************************************************************************/
-+/*
-+ * MPI_CHECKF will display a custom format string as well as an error string
-+ * from the MPI_STATUS and then exit the program
-+ */
-+
-+#define MPI_CHECKF(MPI_STATUS, FORMAT, ...) do {                         \
-+    char resultString[MPI_MAX_ERROR_STRING];                             \
-+    int resultLength;                                                    \
-+    int checkf_mpi_status = MPI_STATUS;                                  \
-+                                                                         \
-+    if (checkf_mpi_status != MPI_SUCCESS) {                              \
-+        MPI_Error_string(checkf_mpi_status, resultString, &resultLength);\
-+        fprintf(out_logfile, "ERROR: " FORMAT ", MPI %s, (%s:%d)\n",     \
-+                __VA_ARGS__, resultString, __FILE__, __LINE__);          \
-+        fflush(out_logfile);                                             \
-+        MPI_Abort(MPI_COMM_WORLD, -1);                                   \
-+    }                                                                    \
++    }                                                                   \
 +} while(0)
 +
-+
-+/******************************************************************************/
-+/*
-+ * MPI_CHECK will display a custom error message as well as an error string
-+ * from the MPI_STATUS and then exit the program
-+ */
-+
-+#define MPI_CHECK(MPI_STATUS, MSG) do {                                  \
-+    MPI_CHECKF(MPI_STATUS, "%s", MSG);                                   \
++/* if MPI_STATUS indicates error, display simple error message with */
++/* error string from MPI_STATUS and terminate execution */
++#define MPI_CHECK(MPI_STATUS, MSG) do {                                 \
++    MPI_CHECKF(MPI_STATUS, "%s", MSG);                                  \
 +} while(0)
 +
 +#endif
@@ -9427,7 +10065,7 @@ index 71f99d1..6c9a971 100644
  {
          char warn_str[256] = {0};
 diff --git a/src/aiori.h b/src/aiori.h
-index 4d416c2..6f78e5f 100755
+index 4d416c2..e0756d0 100755
 --- a/src/aiori.h
 +++ b/src/aiori.h
 @@ -15,17 +15,11 @@
@@ -9558,7 +10196,7 @@ index 4d416c2..6f78e5f 100755
  const ior_aiori_t *aiori_select (const char *api);
  int aiori_count (void);
  void aiori_supported_apis(char * APIs, char * APIs_legacy, enum bench_type type);
-@@ -125,25 +151,17 @@ const char *aiori_default (void);
+@@ -125,25 +151,27 @@ const char *aiori_default (void);
  
  /* some generic POSIX-based backend calls */
  char * aiori_get_version (void);
@@ -9589,7 +10227,17 @@ index 4d416c2..6f78e5f 100755
 +int aiori_posix_stat (const char *path, struct stat *buf, aiori_mod_opt_t * module_options);
 +
 +
-+/* NOTE: these 4 MPI-IO functions are exported for reuse by HDF5/PNetCDF */
++/* NOTE: these MPI-IO pro are exported for reuse by HDF5/PNetCDF */
++
++typedef struct { /* if you change this datatype, e.g., adding more options, make sure that all depending modules are updated */
++  int showHints;                   /* show hints */
++  int useFileView;                 /* use MPI_File_set_view */
++  int preallocate;                 /* preallocate file size */
++  int useSharedFilePointer;        /* use shared file pointer */
++  int useStridedDatatype;          /* put strided access into datatype */
++  char * hintsFileName;            /* full name for hints file */
++} mpiio_options_t;
++
 +void MPIIO_Delete(char *testFileName, aiori_mod_opt_t * module_options);
 +IOR_offset_t MPIIO_GetFileSize(aiori_mod_opt_t * options, char *testFileName);
 +int MPIIO_Access(const char *, int, aiori_mod_opt_t * module_options);
@@ -9619,7 +10267,7 @@ index 9cc8406..c0af544 100644
  struct results {
    double min;
 diff --git a/src/ior-output.c b/src/ior-output.c
-index 01136fb..1b21a00 100644
+index 01136fb..3f75e46 100644
 --- a/src/ior-output.c
 +++ b/src/ior-output.c
 @@ -20,6 +20,8 @@ void PrintTableHeader(){
@@ -9649,16 +10297,23 @@ index 01136fb..1b21a00 100644
    }
  }
  
-@@ -98,7 +98,7 @@ static void PrintKeyValDouble(char * key, double value){
+@@ -96,9 +96,13 @@ static void PrintKeyValDouble(char * key, double value){
+     return;
+   }
    if(outputFormat == OUTPUT_JSON){
-     fprintf(out_resultfile, "\"%s\": %.4f", key, value);
+-    fprintf(out_resultfile, "\"%s\": %.4f", key, value);
++    if(isinf(value)){
++      fprintf(out_resultfile, "\"%s\": \"%.4f\"", key, value);
++    }else{
++      fprintf(out_resultfile, "\"%s\": %.4f", key, value);
++    }
    }else if(outputFormat == OUTPUT_CSV){
 -    fprintf(out_resultfile, "%.4f", value);
 +    fprintf(out_resultfile, "%.4f,", value);
    }
  }
  
-@@ -113,7 +113,7 @@ static void PrintKeyValInt(char * key, int64_t value){
+@@ -113,7 +117,7 @@ static void PrintKeyValInt(char * key, int64_t value){
    if(outputFormat == OUTPUT_JSON){
      fprintf(out_resultfile, "\"%s\": %lld", key, (long long)  value);
    }else if(outputFormat == OUTPUT_CSV){
@@ -9667,7 +10322,7 @@ index 01136fb..1b21a00 100644
    }
  }
  
-@@ -203,14 +203,17 @@ void PrintRepeatEnd(){
+@@ -203,14 +207,17 @@ void PrintRepeatEnd(){
  void PrintRepeatStart(){
    if (rank != 0)
            return;
@@ -9687,7 +10342,7 @@ index 01136fb..1b21a00 100644
      PrintEndSection();
      return;
    }
-@@ -246,7 +249,21 @@ void PrintReducedResult(IOR_test_t *test, int access, double bw, double iops, do
+@@ -246,7 +253,21 @@ void PrintReducedResult(IOR_test_t *test, int access, double bw, double iops, do
      PrintKeyValDouble("closeTime", diff_subset[2]);
      PrintKeyValDouble("totalTime", totalTime);
      PrintEndSection();
@@ -9709,7 +10364,7 @@ index 01136fb..1b21a00 100644
    fflush(out_resultfile);
  }
  
-@@ -258,6 +275,10 @@ void PrintHeader(int argc, char **argv)
+@@ -258,6 +279,10 @@ void PrintHeader(int argc, char **argv)
          if (rank != 0)
                  return;
  
@@ -9720,7 +10375,16 @@ index 01136fb..1b21a00 100644
          PrintStartSection();
          if (outputFormat != OUTPUT_DEFAULT){
            PrintKeyVal("Version", META_VERSION);
-@@ -284,23 +305,6 @@ void PrintHeader(int argc, char **argv)
+@@ -272,7 +297,7 @@ void PrintHeader(int argc, char **argv)
+         }
+         PrintKeyValEnd();
+         if (uname(&unamebuf) != 0) {
+-                EWARN("uname failed");
++                WARN("uname failed");
+                 PrintKeyVal("Machine", "Unknown");
+         } else {
+                 PrintKeyValStart("Machine");
+@@ -284,23 +309,6 @@ void PrintHeader(int argc, char **argv)
                  }
                  PrintKeyValEnd();
          }
@@ -9744,7 +10408,7 @@ index 01136fb..1b21a00 100644
          if (verbose >= VERBOSE_3) {     /* show env */
                  fprintf(out_logfile, "STARTING ENVIRON LOOP\n");
                  for (i = 0; environ[i] != NULL; i++) {
-@@ -319,14 +323,16 @@ void PrintHeader(int argc, char **argv)
+@@ -319,14 +327,16 @@ void PrintHeader(int argc, char **argv)
   */
  void ShowTestStart(IOR_param_t *test)
  {
@@ -9766,7 +10430,7 @@ index 01136fb..1b21a00 100644
  
    if (verbose >= VERBOSE_3 || outputFormat == OUTPUT_JSON) {
      char* data_packets[] = {"g","t","o","i"};
-@@ -337,7 +343,6 @@ void ShowTestStart(IOR_param_t *test)
+@@ -337,7 +347,6 @@ void ShowTestStart(IOR_param_t *test)
      PrintKeyVal("api", test->api);
      PrintKeyVal("platform", test->platform);
      PrintKeyVal("testFileName", test->testFileName);
@@ -9774,7 +10438,7 @@ index 01136fb..1b21a00 100644
      PrintKeyValInt("deadlineForStonewall", test->deadlineForStonewalling);
      PrintKeyValInt("stoneWallingWearOut", test->stoneWallingWearOut);
      PrintKeyValInt("maxTimeDuration", test->maxTimeDuration);
-@@ -355,9 +360,7 @@ void ShowTestStart(IOR_param_t *test)
+@@ -355,9 +364,7 @@ void ShowTestStart(IOR_param_t *test)
      PrintKeyValInt("fsync", test->fsync);
      PrintKeyValInt("fsyncperwrite", test->fsyncPerWrite);
      PrintKeyValInt("useExistingTestFile", test->useExistingTestFile);
@@ -9784,7 +10448,7 @@ index 01136fb..1b21a00 100644
      PrintKeyValInt("singleXferAttempt", test->singleXferAttempt);
      PrintKeyValInt("readFile", test->readFile);
      PrintKeyValInt("writeFile", test->writeFile);
-@@ -368,24 +371,19 @@ void ShowTestStart(IOR_param_t *test)
+@@ -368,24 +375,19 @@ void ShowTestStart(IOR_param_t *test)
      PrintKeyValInt("randomOffset", test->randomOffset);
      PrintKeyValInt("checkWrite", test->checkWrite);
      PrintKeyValInt("checkRead", test->checkRead);
@@ -9815,7 +10479,7 @@ index 01136fb..1b21a00 100644
      PrintKeyValInt("transferSize", test->transferSize);
      PrintKeyValInt("blockSize", test->blockSize);
      PrintEndSection();
-@@ -412,6 +410,9 @@ void ShowTestEnd(IOR_test_t *tptr){
+@@ -412,6 +414,9 @@ void ShowTestEnd(IOR_test_t *tptr){
   */
  void ShowSetup(IOR_param_t *params)
  {
@@ -9825,7 +10489,7 @@ index 01136fb..1b21a00 100644
    if (params->debug) {
        fprintf(out_logfile, "\n*** DEBUG MODE ***\n");
        fprintf(out_logfile, "*** %s ***\n\n", params->debug);
-@@ -452,14 +453,10 @@ void ShowSetup(IOR_param_t *params)
+@@ -452,14 +457,10 @@ void ShowSetup(IOR_param_t *params)
    if(params->dryRun){
      PrintKeyValInt("dryRun", params->dryRun);
    }
@@ -9843,7 +10507,7 @@ index 01136fb..1b21a00 100644
    if (params->deadlineForStonewalling > 0) {
      PrintKeyValInt("stonewallingTime", params->deadlineForStonewalling);
      PrintKeyValInt("stoneWallingWearOut", params->stoneWallingWearOut );
-@@ -535,7 +532,7 @@ static void PrintLongSummaryOneOperation(IOR_test_t *test, const int access)
+@@ -535,7 +536,7 @@ static void PrintLongSummaryOneOperation(IOR_test_t *test, const int access)
          struct results *ops;
  
          int reps;
@@ -9852,7 +10516,7 @@ index 01136fb..1b21a00 100644
                  return;
  
          reps = params->repetitions;
-@@ -609,9 +606,6 @@ static void PrintLongSummaryOneOperation(IOR_test_t *test, const int access)
+@@ -609,9 +610,6 @@ static void PrintLongSummaryOneOperation(IOR_test_t *test, const int access)
            PrintKeyValInt("taskPerNodeOffset", params->taskPerNodeOffset);
            PrintKeyValInt("reorderTasksRandom", params->reorderTasksRandom);
            PrintKeyValInt("reorderTasksRandomSeed", params->reorderTasksRandomSeed);
@@ -9862,7 +10526,7 @@ index 01136fb..1b21a00 100644
            PrintKeyValDouble("bwMaxMIB", bw->max / MEBIBYTE);
            PrintKeyValDouble("bwMinMIB", bw->min / MEBIBYTE);
            PrintKeyValDouble("bwMeanMIB", bw->mean / MEBIBYTE);
-@@ -627,8 +621,6 @@ static void PrintLongSummaryOneOperation(IOR_test_t *test, const int access)
+@@ -627,8 +625,6 @@ static void PrintLongSummaryOneOperation(IOR_test_t *test, const int access)
            }
            PrintKeyValDouble("xsizeMiB", (double) point->aggFileSizeForBW / MEBIBYTE);
            PrintEndSection();
@@ -9871,7 +10535,7 @@ index 01136fb..1b21a00 100644
          }
  
          fflush(out_resultfile);
-@@ -650,10 +642,10 @@ void PrintLongSummaryOneTest(IOR_test_t *test)
+@@ -650,10 +646,10 @@ void PrintLongSummaryOneTest(IOR_test_t *test)
  
  void PrintLongSummaryHeader()
  {
@@ -9884,7 +10548,7 @@ index 01136fb..1b21a00 100644
          }
  
          fprintf(out_resultfile, "\n");
-@@ -670,7 +662,7 @@ void PrintLongSummaryHeader()
+@@ -670,7 +666,7 @@ void PrintLongSummaryHeader()
  void PrintLongSummaryAllTests(IOR_test_t *tests_head)
  {
    IOR_test_t *tptr;
@@ -9893,7 +10557,7 @@ index 01136fb..1b21a00 100644
            return;
  
    PrintArrayEnd();
-@@ -680,8 +672,6 @@ void PrintLongSummaryAllTests(IOR_test_t *tests_head)
+@@ -680,8 +676,6 @@ void PrintLongSummaryAllTests(IOR_test_t *tests_head)
      fprintf(out_resultfile, "Summary of all tests:");
    }else if (outputFormat == OUTPUT_JSON){
      PrintNamedArrayStart("summary");
@@ -9902,7 +10566,7 @@ index 01136fb..1b21a00 100644
    }
  
    PrintLongSummaryHeader();
-@@ -703,7 +693,7 @@ void PrintShortSummary(IOR_test_t * test)
+@@ -703,7 +697,7 @@ void PrintShortSummary(IOR_test_t * test)
          int reps;
          int i;
  
@@ -9911,7 +10575,7 @@ index 01136fb..1b21a00 100644
                  return;
  
          PrintArrayEnd();
-@@ -740,41 +730,9 @@ void PrintShortSummary(IOR_test_t * test)
+@@ -740,41 +734,9 @@ void PrintShortSummary(IOR_test_t * test)
          }
  }
  
@@ -9955,7 +10619,7 @@ index 01136fb..1b21a00 100644
  
    if (outputFormat == OUTPUT_DEFAULT){
 diff --git a/src/ior.c b/src/ior.c
-index 361a9a4..a4af7b3 100755
+index 361a9a4..81ef0e6 100755
 --- a/src/ior.c
 +++ b/src/ior.c
 @@ -33,6 +33,10 @@
@@ -10041,7 +10705,7 @@ index 361a9a4..a4af7b3 100755
 +#ifdef HAVE_CUDA
 +  cudaError_t cret = cudaSetDevice(test->params.gpuID);
 +  if(cret != cudaSuccess){
-+    EWARNF("cudaSetDevice(%d) error: %s", test->params.gpuID, cudaGetErrorString(cret));
++    WARNF("cudaSetDevice(%d) error: %s", test->params.gpuID, cudaGetErrorString(cret));
 +  }
 +#endif
 +
@@ -10232,7 +10896,7 @@ index 361a9a4..a4af7b3 100755
 -                        hostname, rank, accessString, timeString, timerVal);
 -                fprintf(out_logfile, "         (mean=%f, stddev=%f)\n", mean, sd);
 -                fflush(out_logfile);
-+                EWARNF("for %s, task %d, %s %s is %f (mean=%f, stddev=%f)\n",
++                WARNF("for %s, task %d, %s %s is %f (mean=%f, stddev=%f)\n",
 +                        hostname, rank, accessString, timeString, timerVal,  mean, sd);
          }
  }
@@ -10297,13 +10961,13 @@ index 361a9a4..a4af7b3 100755
 -                                fprintf(out_logfile,
 -                                        "WARNING: Using actual aggregate bytes moved = %lld.\n",
 -                                        (long long) point->aggFileSizeFromXfer);
-+                                EWARNF("Expected aggregate file size       = %lld", (long long) params->expectedAggFileSize);
-+                                EWARNF("Stat() of aggregate file size      = %lld", (long long) point->aggFileSizeFromStat);
-+                                EWARNF("Using actual aggregate bytes moved = %lld", (long long) point->aggFileSizeFromXfer);
++                                WARNF("Expected aggregate file size       = %lld", (long long) params->expectedAggFileSize);
++                                WARNF("Stat() of aggregate file size      = %lld", (long long) point->aggFileSizeFromStat);
++                                WARNF("Using actual aggregate bytes moved = %lld", (long long) point->aggFileSizeFromXfer);
                                  if(params->deadlineForStonewalling){
 -                                  fprintf(out_logfile,
 -                                        "WARNING: maybe caused by deadlineForStonewalling\n");
-+                                  EWARN("Maybe caused by deadlineForStonewalling");
++                                  WARN("Maybe caused by deadlineForStonewalling");
                                  }
                          }
                  }
@@ -10417,7 +11081,7 @@ index 361a9a4..a4af7b3 100755
                                  allErrors = -1;
                          }
 -                        fprintf(out_logfile, "WARNING: incorrect data on %s (%d errors found).\n",
-+                        EWARNF("Incorrect data on %s (%d errors found).\n",
++                        WARNF("Incorrect data on %s (%d errors found).\n",
                                  access == WRITECHECK ? "write" : "read", allErrors);
                          fprintf(out_logfile,
                                  "Used Time Stamp %u (0x%x) for Data Signature\n",
@@ -10554,6 +11218,15 @@ index 361a9a4..a4af7b3 100755
  /*
   * Return string describing machine name and type.
   */
+@@ -668,7 +546,7 @@ char * GetPlatformName()
+         struct utsname name;
+ 
+         if (uname(&name) != 0) {
+-                EWARN("cannot get platform name");
++                WARN("cannot get platform name");
+                 sprintf(sysName, "%s", "Unknown");
+                 sprintf(nodeName, "%s", "Unknown");
+         } else {
 @@ -752,10 +630,16 @@ void GetTestFileName(char *testFileName, IOR_param_t * test)
          char   initialTestFileName[MAX_PATHLEN];
          char   testFileNameRoot[MAX_STR];
@@ -10658,11 +11331,11 @@ index 361a9a4..a4af7b3 100755
                          if (rank == 0) {
 -                                fprintf(out_logfile,
 -                                        "WARNING: More tasks requested (%d) than available (%d),",
-+                                EWARNF("More tasks requested (%d) than available (%d),",
++                                WARNF("More tasks requested (%d) than available (%d),",
                                          params->numTasks, mpiNumTasks);
 -                                fprintf(out_logfile, "         running with %d tasks.\n",
 -                                        mpiNumTasks);
-+                                EWARNF("         running with %d tasks.\n", mpiNumTasks);
++                                WARNF("         running with %d tasks.\n", mpiNumTasks);
                          }
                          params->numTasks = mpiNumTasks;
                  }
@@ -10839,7 +11512,7 @@ index 361a9a4..a4af7b3 100755
 +          GetTestFileName(testFileName, params);
 +          int ret = backend->stat(testFileName, & sb, params->backend_options);
 +          if(ret == 0) {
-+            EWARNF("The file \"%s\" exists already and will be overwritten", testFileName);
++            WARNF("The file \"%s\" exists already and will be overwritten", testFileName);
 +          }
 +        }
 +
@@ -12012,10 +12685,10 @@ index 0000000..bb94126
 +}
 diff --git a/src/md-workbench.c b/src/md-workbench.c
 new file mode 100644
-index 0000000..2c4d305
+index 0000000..48998a5
 --- /dev/null
 +++ b/src/md-workbench.c
-@@ -0,0 +1,1053 @@
+@@ -0,0 +1,1055 @@
 +#include <mpi.h>
 +
 +#include <time.h>
@@ -12681,7 +13354,7 @@ index 0000000..2c4d305
 +        }
 +      }else{
 +        s->obj_read.err++;
-+        EWARNF("%d: Error while reading the obj: %s", o.rank, obj_name);
++        WARNF("%d: Error while reading the obj: %s", o.rank, obj_name);
 +      }
 +      o.backend->close(aiori_fh, o.backend_options);
 +
@@ -12728,7 +13401,7 @@ index 0000000..2c4d305
 +        if (! o.ignore_precreate_errors){
 +         ERRF("%d: Error while creating the obj: %s", o.rank, obj_name);
 +        }
-+        EWARNF("Unable to open file %s", obj_name);
++        WARNF("Unable to open file %s", obj_name);
 +        s->obj_create.err++;
 +      }
 +      bench_runtime = add_timed_result(op_timer, s->phase_start_timer, s->time_create, pos, & s->max_op_time, & op_time);
@@ -12869,12 +13542,12 @@ index 0000000..2c4d305
 +    FILE * f = fopen(o.run_info_file, "r");
 +    if(! f){
 +      ERRF("[ERROR] Could not open %s for restart", o.run_info_file);
-+      exit(1);
++      exit(EXIT_FAILURE);
 +    }
 +    ret = fscanf(f, "pos: %d", & position);
 +    if (ret != 1){
 +      ERRF("Could not read from %s for restart", o.run_info_file);
-+      exit(1);
++      exit(EXIT_FAILURE);
 +    }
 +    fclose(f);
 +  }
@@ -12889,7 +13562,7 @@ index 0000000..2c4d305
 +  FILE * f = fopen(o.run_info_file, "w");
 +  if(! f){
 +    ERRF("[ERROR] Could not open %s for saving data", o.run_info_file);
-+    exit(1);
++    exit(EXIT_FAILURE);
 +  }
 +  fprintf(f, "pos: %d\n", position);
 +  fclose(f);
@@ -12917,6 +13590,8 @@ index 0000000..2c4d305
 +  }
 +
 +  memset(& o.hints, 0, sizeof(o.hints));
++  o.hints.filePerProc = 1;
++  
 +  options_all_t * global_options = airoi_create_all_module_options(options);
 +  int parsed = option_parse(argc, argv, global_options);
 +  o.backend = aiori_select(o.interface);
@@ -13002,7 +13677,7 @@ index 0000000..2c4d305
 +  if (o.phase_precreate){
 +    if (o.rank == 0){
 +      if (o.backend->mkdir(o.prefix, DIRMODE, o.backend_options) != 0) {
-+          EWARNF("Unable to create test directory %s", o.prefix);
++          WARNF("Unable to create test directory %s", o.prefix);
 +      }
 +    }
 +    init_stats(& phase_stats, o.precreate * o.dset_count);
@@ -13118,7 +13793,7 @@ index 0000000..394a43c
 +
 +#endif
 diff --git a/src/mdtest.c b/src/mdtest.c
-index de0c52a..6e6dcb2 100644
+index de0c52a..9d4cbec 100644
 --- a/src/mdtest.c
 +++ b/src/mdtest.c
 @@ -76,6 +76,8 @@
@@ -13390,9 +14065,9 @@ index de0c52a..6e6dcb2 100644
 +  if (*o.prologue){
 +    VERBOSE(0,5,"calling prologue: \"%s\"", o.prologue);
 +    system(o.prologue);
-+    if (o.barriers) {
-+      MPI_Barrier(testComm);
-+    }
++  }
++  if (o.barriers) {
++    MPI_Barrier(testComm);
    }
 -  pos += sprintf(& testdir[pos], "%s", TEST_DIR);
 -  pos += sprintf(& testdir[pos], ".%d-%d", j, dir_iter);
@@ -13451,13 +14126,13 @@ index de0c52a..6e6dcb2 100644
 -        if (backend->mkdir(curr_item, DIRMODE, &param) == -1) {
 -            FAIL("unable to create directory %s", curr_item);
 +        if (o.backend->mkdir(curr_item, DIRMODE, o.backend_options) == -1) {
-+            EWARNF("unable to create directory %s", curr_item);
++            WARNF("unable to create directory %s", curr_item);
          }
      } else {
 -        if (backend->rmdir(curr_item, &param) == -1) {
 -            FAIL("unable to remove directory %s", curr_item);
 +        if (o.backend->rmdir(curr_item, o.backend_options) == -1) {
-+            EWARNF("unable to remove directory %s", curr_item);
++            WARNF("unable to remove directory %s", curr_item);
          }
      }
  }
@@ -13501,7 +14176,7 @@ index de0c52a..6e6dcb2 100644
 +        ret = o.backend->mknod (curr_item);
          if (ret != 0)
 -            FAIL("unable to mknode file %s", curr_item);
-+            EWARNF("unable to mknode file %s", curr_item);
++            WARNF("unable to mknode file %s", curr_item);
  
          return;
 -    } else if (collective_creates) {
@@ -13513,7 +14188,7 @@ index de0c52a..6e6dcb2 100644
 -            FAIL("unable to open file %s", curr_item);
 +        aiori_fh = o.backend->open (curr_item, IOR_WRONLY | IOR_CREAT, o.backend_options);
 +        if (NULL == aiori_fh){
-+            EWARNF("unable to open file %s", curr_item);
++            WARNF("unable to open file %s", curr_item);
 +            return;
 +        }
  
@@ -13532,7 +14207,7 @@ index de0c52a..6e6dcb2 100644
 -            FAIL("unable to create file %s", curr_item);
 +        aiori_fh = o.backend->create (curr_item, IOR_WRONLY | IOR_CREAT, o.backend_options);
 +        if (NULL == aiori_fh){
-+          EWARNF("unable to create file %s", curr_item);
++          WARNF("unable to create file %s", curr_item);
 +          return;
 +        }
      }
@@ -13553,13 +14228,13 @@ index de0c52a..6e6dcb2 100644
 +        update_write_memory_pattern(itemNum, o.write_buffer, o.write_bytes, o.random_buffer_offset, rank, o.dataPacketType);
 +
 +        if ( o.write_bytes != (size_t) o.backend->xfer(WRITE, aiori_fh, (IOR_size_t *) o.write_buffer, o.write_bytes, 0, o.backend_options)) {
-+            EWARNF("unable to write file %s", curr_item);
++            WARNF("unable to write file %s", curr_item);
 +        }
 +
 +        if (o.verify_write) {
 +            o.write_buffer[0] = 42;
 +            if (o.write_bytes != (size_t) o.backend->xfer(READ, aiori_fh, (IOR_size_t *) o.write_buffer, o.write_bytes, 0, o.backend_options)) {
-+                EWARNF("unable to verify write (read/back) file %s", curr_item);
++                WARNF("unable to verify write (read/back) file %s", curr_item);
 +            }
 +            int error = verify_memory_pattern(itemNum, o.write_buffer, o.write_bytes, o.random_buffer_offset, rank, o.dataPacketType);
 +            o.verification_error += error;
@@ -13594,7 +14269,7 @@ index de0c52a..6e6dcb2 100644
 +            aiori_fh = o.backend->create (curr_item, IOR_WRONLY | IOR_CREAT, o.backend_options);
              if (NULL == aiori_fh) {
 -                FAIL("unable to create file %s", curr_item);
-+                EWARNF("unable to create file %s", curr_item);
++                WARNF("unable to create file %s", curr_item);
 +            }else{
 +              o.backend->close (aiori_fh, o.backend_options);
              }
@@ -13747,7 +14422,7 @@ index de0c52a..6e6dcb2 100644
 -        if (-1 == backend->stat (item, &buf, &param)) {
 -            FAIL("unable to stat %s %s", dirs ? "directory" : "file", item);
 +        if (-1 == o.backend->stat (item, &buf, o.backend_options)) {
-+            EWARNF("unable to stat %s %s", dirs ? "directory" : "file", item);
++            WARNF("unable to stat %s %s", dirs ? "directory" : "file", item);
          }
      }
  }
@@ -13853,7 +14528,7 @@ index de0c52a..6e6dcb2 100644
 +        aiori_fh = o.backend->open (item, O_RDONLY, o.backend_options);
          if (NULL == aiori_fh) {
 -            FAIL("unable to open file %s", item);
-+            EWARNF("unable to open file %s", item);
++            WARNF("unable to open file %s", item);
 +            continue;
          }
  
@@ -13865,7 +14540,7 @@ index de0c52a..6e6dcb2 100644
 +        if (o.read_bytes > 0) {
 +            read_buffer[0] = 42;
 +            if (o.read_bytes != (size_t) o.backend->xfer(READ, aiori_fh, (IOR_size_t *) read_buffer, o.read_bytes, 0, o.backend_options)) {
-+                EWARNF("unable to read file %s", item);
++                WARNF("unable to read file %s", item);
 +                continue;
              }
 -            if(verify_read){
@@ -14075,7 +14750,7 @@ index de0c52a..6e6dcb2 100644
 +          strcpy(item, first_item_name);
 +        }
 +        if (-1 == o.backend->rename(item, item_last, o.backend_options)) {
-+            EWARNF("unable to rename %s %s", dirs ? "directory" : "file", item);
++            WARNF("unable to rename %s %s", dirs ? "directory" : "file", item);
 +        }
 +
 +        strcpy(item_last, item);
@@ -15428,7 +16103,7 @@ index de0c52a..6e6dcb2 100644
 -            if (-1 == backend->mkdir (dir, DIRMODE, &param)) {
 -                fprintf(out_logfile, "error could not create directory '%s'\n", dir);
 +            if (-1 == o.backend->mkdir (dir, DIRMODE, o.backend_options)) {
-+                EWARNF("unable to create tree directory '%s'", dir);
++                WARNF("unable to create tree directory '%s'", dir);
              }
  #ifdef HAVE_LUSTRE_LUSTREAPI
              /* internal node for branching, can be non-striped for children */
@@ -15444,7 +16119,7 @@ index de0c52a..6e6dcb2 100644
 -            if (-1 == backend->rmdir(dir, &param)) {
 -                FAIL("Unable to remove directory %s", dir);
 +            if (-1 == o.backend->rmdir(dir, o.backend_options)) {
-+                EWARNF("Unable to remove directory %s", dir);
++                WARNF("Unable to remove directory %s", dir);
              }
          }
 -    } else if (currDepth <= depth) {
@@ -15465,7 +16140,7 @@ index de0c52a..6e6dcb2 100644
 -                if (-1 == backend->mkdir(temp_path, DIRMODE, &param)) {
 -                    FAIL("Unable to create directory %s", temp_path);
 +                if (-1 == o.backend->mkdir(temp_path, DIRMODE, o.backend_options)) {
-+                    EWARNF("Unable to create directory %s", temp_path);
++                    WARNF("Unable to create directory %s", temp_path);
                  }
              }
  
@@ -15479,7 +16154,7 @@ index de0c52a..6e6dcb2 100644
 -                if (-1 == backend->rmdir(temp_path, &param)) {
 -                    FAIL("Unable to remove directory %s", temp_path);
 +                if (-1 == o.backend->rmdir(temp_path, o.backend_options)) {
-+                    EWARNF("Unable to remove directory %s", temp_path);
++                    WARNF("Unable to remove directory %s", temp_path);
                  }
              }
  
@@ -15520,7 +16195,7 @@ index de0c52a..6e6dcb2 100644
 +      VERBOSE(2,5,"main (for j loop): making o.testdir, '%s'", o.testdir );
 +      if (o.backend->access(o.testdir, F_OK, o.backend_options) != 0) {
 +          if (o.backend->mkdir(o.testdir, DIRMODE, o.backend_options) != 0) {
-+              EWARNF("Unable to create test directory %s", o.testdir);
++              WARNF("Unable to create test directory %s", o.testdir);
 +          }
  #ifdef HAVE_LUSTRE_LUSTREAPI
 -        /* internal node for branching, can be non-striped for children */
@@ -15529,7 +16204,7 @@ index de0c52a..6e6dcb2 100644
 -        }
 +          /* internal node for branching, can be non-striped for children */
 +          if (o.global_dir_layout && o.unique_dir_per_task && llapi_dir_set_default_lmv_stripe(o.testdir, -1, 0, LMV_HASH_TYPE_FNV_1A_64, NULL) == -1) {
-+              EWARNF("Unable to reset to global default directory layout", 0);
++              WARN("Unable to reset to global default directory layout");
 +          }
  #endif /* HAVE_LUSTRE_LUSTREAPI */
 +      }
@@ -15817,7 +16492,7 @@ index de0c52a..6e6dcb2 100644
 +        if ((rank < o.path_count) && o.backend->access(o.testdir, F_OK, o.backend_options) == 0) {
 +            //if (( rank == 0 ) && access(o.testdir, F_OK) == 0) {
 +            if (o.backend->rmdir(o.testdir, o.backend_options) == -1) {
-+                EWARNF("unable to remove directory %s", o.testdir);
++                WARNF("unable to remove directory %s", o.testdir);
              }
          }
        }
@@ -15911,9 +16586,10 @@ index de0c52a..6e6dcb2 100644
      option_help options [] = {
 -      {'a', NULL,        apiStr, OPTION_OPTIONAL_ARGUMENT, 's', & param.api},
 -      {'b', NULL,        "branching factor of hierarchical directory structure", OPTION_OPTIONAL_ARGUMENT, 'd', & branch_factor},
+-      {'d', NULL,        "the directory in which the tests will run", OPTION_OPTIONAL_ARGUMENT, 's', & path},
 +      {'a', NULL,        apiStr, OPTION_OPTIONAL_ARGUMENT, 's', & o.api},
 +      {'b', NULL,        "branching factor of hierarchical directory structure", OPTION_OPTIONAL_ARGUMENT, 'd', & o.branch_factor},
-       {'d', NULL,        "the directory in which the tests will run", OPTION_OPTIONAL_ARGUMENT, 's', & path},
++      {'d', NULL,        "directory or multiple directories where the test will run [dir|dir1@dir2@dir3...]", OPTION_OPTIONAL_ARGUMENT, 's', & path},
        {'B', NULL,        "no barriers between phases", OPTION_OPTIONAL_ARGUMENT, 'd', & no_barriers},
 -      {'C', NULL,        "only create files/dirs", OPTION_FLAG, 'd', & create_only},
 -      {'T', NULL,        "only stat files/dirs", OPTION_FLAG, 'd', & stat_only},
@@ -16266,7 +16942,7 @@ index de0c52a..6e6dcb2 100644
 -            FAIL("Unable to create test directory path %s", testdirpath);
 +    if ((rank < o.path_count) && o.backend->access(o.testdirpath, F_OK, o.backend_options) != 0) {
 +        if (o.backend->mkdir(o.testdirpath, DIRMODE, o.backend_options) != 0) {
-+            EWARNF("Unable to create test directory path %s", o.testdirpath);
++            WARNF("Unable to create test directory path %s", o.testdirpath);
          }
 +        created_root_dir = 1;
      }
@@ -16520,7 +17196,7 @@ index 6267282..09f14be 100644
  
  mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE * out_logfile);
 diff --git a/src/option.c b/src/option.c
-index 2c3e8ef..80463d4 100644
+index 2c3e8ef..da19c78 100644
 --- a/src/option.c
 +++ b/src/option.c
 @@ -7,6 +7,23 @@
@@ -16678,7 +17354,7 @@ index 2c3e8ef..80463d4 100644
 +              if(arg == NULL){
 +                const char str[] = {o->shortVar, 0};
 +                printf("Error, argument missing for option %s\n", (o->longVar != NULL) ? o->longVar : str);
-+                exit(1);
++                exit(EXIT_FAILURE);
                }
 -              case('c'):{
 -                (*(char *)o->variable) = arg[0];
@@ -16774,6 +17450,15 @@ index 2c3e8ef..80463d4 100644
      *print_help = 1;
    }else{
      *error = 1;
+@@ -422,7 +460,7 @@ int option_parse(int argc, char ** argv, options_all_t * opt_all){
+       }
+       option_print_help(args);
+     }
+-    exit(0);
++    exit(EXIT_FAILURE);
+   }
+ 
+   return i;
 diff --git a/src/option.h b/src/option.h
 index 624da51..0afa519 100644
 --- a/src/option.h
@@ -16801,7 +17486,7 @@ index 624da51..0afa519 100644
  /* Parse a single line */
  int option_parse_key_value(char * key, char * value, options_all_t * opt_all);
 diff --git a/src/parse_options.c b/src/parse_options.c
-index 607d014..9d1f0f0 100755
+index 607d014..69c27c4 100755
 --- a/src/parse_options.c
 +++ b/src/parse_options.c
 @@ -32,9 +32,7 @@
@@ -16850,6 +17535,24 @@ index 607d014..9d1f0f0 100755
                  }
          }
  }
+@@ -101,7 +95,7 @@ void DecodeDirective(char *line, IOR_param_t *params, options_all_t * module_opt
+                 if (initialized)
+                     MPI_CHECK(MPI_Abort(MPI_COMM_WORLD, -1), "MPI_Abort() error");
+                 else
+-                    exit(-1);
++                    exit(EXIT_FAILURE);
+         }
+         if (strcasecmp(option, "api") == 0) {
+           params->api = strdup(value);
+@@ -109,7 +103,7 @@ void DecodeDirective(char *line, IOR_param_t *params, options_all_t * module_opt
+           params->backend = aiori_select(params->api);
+           if (params->backend == NULL){
+             fprintf(out_logfile, "Could not load backend API %s\n", params->api);
+-            exit(-1);
++            exit(EXIT_FAILURE);
+           }
+         } else if (strcasecmp(option, "summaryFile") == 0) {
+           if (rank == 0){
 @@ -119,6 +113,21 @@ void DecodeDirective(char *line, IOR_param_t *params, options_all_t * module_opt
              }
              printf("Writing output to %s\n", value);
@@ -16992,6 +17695,24 @@ index 607d014..9d1f0f0 100755
          } else if (strcasecmp(option, "summaryalways") == 0) {
                  params->summary_every_test = atoi(value);
          } else {
+@@ -306,7 +258,7 @@ void DecodeDirective(char *line, IOR_param_t *params, options_all_t * module_opt
+                   if (initialized)
+                       MPI_CHECK(MPI_Abort(MPI_COMM_WORLD, -1), "MPI_Abort() error");
+                   else
+-                      exit(-1);
++                      exit(EXIT_FAILURE);
+                 }
+         }
+ }
+@@ -333,7 +285,7 @@ void ParseLine(char *line, IOR_param_t * test, options_all_t * module_options)
+                 }
+                 if(strlen(start) < 3){
+                   fprintf(out_logfile, "Invalid option substring string: \"%s\" in \"%s\"\n", start, line);
+-                  exit(1);
++                  exit(EXIT_FAILURE);
+                 }
+                 DecodeDirective(start, test, module_options);
+                 start = end + 1;
 @@ -363,7 +315,7 @@ int contains_only(char *haystack, char *needle)
          /* check for "needle" */
          if (strncasecmp(ptr, needle, strlen(needle)) != 0)
@@ -17001,6 +17722,17 @@ index 607d014..9d1f0f0 100755
          for (ptr += strlen(needle); ptr < end; ptr++) {
                  if (!isspace(*ptr))
                          return 0;
+@@ -418,8 +370,8 @@ IOR_test_t *ReadConfigScript(char *scriptName)
+                         continue;
+ 
+                 /* skip lines containing only comments */
+-                if (sscanf(ptr, " #%s", empty) == 1)
+-                        continue;
++                if (sscanf(ptr, " #%c", empty) == 1)
++                        continue;                
+ 
+                 if (contains_only(ptr, "ior stop")) {
+                         break;
 @@ -465,20 +417,27 @@ option_help * createGlobalOptions(IOR_param_t * params){
    char APIs[1024];
    char APIs_legacy[1024];
@@ -17050,10 +17782,11 @@ index 607d014..9d1f0f0 100755
 -    {'n', NULL,        "noFill -- no fill in HDF5 file creation", OPTION_FLAG, 'd', & params->noFill},
      {'N', NULL,        "numTasks -- number of tasks that are participating in the test (overrides MPI)", OPTION_OPTIONAL_ARGUMENT, 'd', & params->numTasks},
      {'o', NULL,        "testFile -- full name for test", OPTION_OPTIONAL_ARGUMENT, 's', & params->testFileName},
-     {'O', NULL,        "string of IOR directives (e.g. -O checkRead=1,lustreStripeCount=32)", OPTION_OPTIONAL_ARGUMENT, 'p', & decodeDirectiveWrapper},
+-    {'O', NULL,        "string of IOR directives (e.g. -O checkRead=1,lustreStripeCount=32)", OPTION_OPTIONAL_ARGUMENT, 'p', & decodeDirectiveWrapper},
 -    {'p', NULL,        "preallocate -- preallocate file size", OPTION_FLAG, 'd', & params->preallocate},
 -    {'P', NULL,        "useSharedFilePointer -- use shared file pointer [not working]", OPTION_FLAG, 'd', & params->useSharedFilePointer},
 -    {'q', NULL,        "quitOnError -- during file error-checking, abort on error", OPTION_FLAG, 'd', & params->quitOnError},
++    {'O', NULL,        "string of IOR directives (e.g. -O checkRead=1,GPUid=2)", OPTION_OPTIONAL_ARGUMENT, 'p', & decodeDirectiveWrapper},
      {'Q', NULL,        "taskPerNodeOffset for read tests use with -C & -Z options (-C constant N, -Z at least N)", OPTION_OPTIONAL_ARGUMENT, 'd', & params->taskPerNodeOffset},
      {'r', NULL,        "readFile -- read existing file", OPTION_FLAG, 'd', & params->readFile},
      {'R', NULL,        "checkRead -- verify that the output of read matches the expected signature (used with -G)", OPTION_FLAG, 'd', & params->checkRead},
@@ -17109,11 +17842,21 @@ index 45b93ca..b12dd78 100755
 +IOR_test_t *ParseCommandLine(int argc, char **argv, MPI_Comm com);
  
  #endif  /* !_PARSE_OPTIONS_H */
+diff --git a/src/test/Makefile.am b/src/test/Makefile.am
+index 1f2b141..758d526 100755
+--- a/src/test/Makefile.am
++++ b/src/test/Makefile.am
+@@ -1,4 +1,4 @@
+-LDFLAGS  = $(extraLDFLAGS)
++AM_LDFLAGS = $(extraLDFLAGS)
+ LDADD    = ../libaiori.a $(extraLDADD)
+ 
+ # Add test here
 diff --git a/src/test/example.c b/src/test/example.c
-index 5bb4b2b..3b31066 100644
+index 5bb4b2b..c9bb152 100644
 --- a/src/test/example.c
 +++ b/src/test/example.c
-@@ -1,8 +1,10 @@
+@@ -1,13 +1,16 @@
  #include <assert.h>
  
 -#include <ior.h>
@@ -17125,8 +17868,16 @@ index 5bb4b2b..3b31066 100644
 +// make distcheck
  // build a single test via, e.g., mpicc example.c -I ../src/ ../src/libaiori.a -lm
  
- int main(){
-@@ -16,16 +18,6 @@ int main(){
+-int main(){
++int main(int argc, char** argv) {
++  MPI_Init(&argc, &argv);
+   IOR_param_t test;
+-  init_IOR_Param_t(& test);
++  init_IOR_Param_t(& test, MPI_COMM_WORLD);
+   test.blockSize = 10;
+   test.transferSize = 10;
+   test.segmentCount = 5;
+@@ -16,16 +19,7 @@ int main(){
    // having an individual file
    test.filePerProc = 1;
  
@@ -17141,10 +17892,11 @@ index 5bb4b2b..3b31066 100644
 -  //   printf("%lld\n", (long long int) offsets[i]);
 -  // }
    printf("OK\n");
++  MPI_Finalize();
    return 0;
  }
 diff --git a/src/utilities.c b/src/utilities.c
-index bcb1e03..e551d61 100755
+index bcb1e03..65eaec1 100755
 --- a/src/utilities.c
 +++ b/src/utilities.c
 @@ -16,6 +16,12 @@
@@ -17668,7 +18420,7 @@ index bcb1e03..e551d61 100755
  }
  
  char * PrintTimestamp() {
-@@ -792,16 +879,16 @@ char * PrintTimestamp() {
+@@ -792,24 +879,25 @@ char * PrintTimestamp() {
      return datestring;
  }
  
@@ -17688,7 +18440,8 @@ index bcb1e03..e551d61 100755
        return data;
      }
      int ret = fscanf(out, "%lld", & data);
-@@ -809,7 +896,7 @@ int64_t ReadStoneWallingIterations(char * const filename){
+     if (ret != 1){
++      fclose(out);
        return -1;
      }
      fclose(out);
@@ -17697,7 +18450,7 @@ index bcb1e03..e551d61 100755
      return data;
    }
  }
-@@ -892,3 +979,99 @@ char *HumanReadable(IOR_offset_t value, int base)
+@@ -892,3 +980,99 @@ char *HumanReadable(IOR_offset_t value, int base)
          }
          return valueStr;
  }
@@ -17938,6 +18691,28 @@ index 0000000..0165dfb
 +echo export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64/
 +echo export CLASSPATH=$(find $VER/  -name "*.jar" -printf "%p:")
 +echo ./src/ior   -a HDFS
+diff --git a/testing/build-pnetcdf.sh b/testing/build-pnetcdf.sh
+new file mode 100755
+index 0000000..ff14571
+--- /dev/null
++++ b/testing/build-pnetcdf.sh
+@@ -0,0 +1,16 @@
++#!/bin/bash -e
++
++mkdir build-pnetcdf
++cd build-pnetcdf
++VER=pnetcdf-1.12.2.tar.gz
++if [[ ! -e $VER ]] ; then
++  wget https://parallel-netcdf.github.io/Release/$VER
++  tar -xf $VER
++  CUR_DIR=$(pwd)
++  pushd pnetcdf*/
++  ./configure --prefix=$CUR_DIR/install
++  make -j install
++  popd
++fi
++
++../configure --with-ncmpi LDFLAGS=-L$(pwd)/install/lib CFLAGS=-I$(pwd)/install/include
 diff --git a/testing/complex-tests.sh b/testing/complex-tests.sh
 index c314cf9..e4692dd 100755
 --- a/testing/complex-tests.sh
