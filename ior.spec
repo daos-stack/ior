@@ -18,6 +18,7 @@ Source0:    https://github.com/hpc/%{name}/releases/download/%{version}/%{name}-
 %if "%{?commit}" != ""
 Patch1: %{version}..%{commit}.patch
 %endif
+Patch2: hdf5-pkg-config.patch
 
 BuildRequires: mpich-devel
 BuildRequires: hwloc-devel
