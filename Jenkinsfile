@@ -41,4 +41,5 @@
 //@Library(value="pipeline-lib@your_branch") _
 
 // no debian/ support yet
-packageBuildingPipeline(['distros' : ['centos7', 'centos8', 'leap15']])
+packageBuildingPipelineDAOSTest(['distros' : ['centos7', 'el8', 'leap15', 'ubuntu20.04'],
+                                 'test-tag': 'ior'])
