@@ -5,6 +5,7 @@ Section: devel
 Priority: optional
 Build-Depends: debhelper-compat (= 12),
                pkg-config,
+               chrpath,
                libhwloc-dev,
                libevent-dev,
                unzip,
