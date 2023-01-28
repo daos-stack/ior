@@ -4,6 +4,7 @@ Uploaders: Brian J. Murrell <brian.murrell@intel.com>
 Section: devel
 Priority: optional
 Build-Depends: debhelper-compat (= 12),
+               pkg-config,
                libhwloc-dev,
                libevent-dev,
                unzip,
