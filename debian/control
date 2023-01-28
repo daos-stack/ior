@@ -11,8 +11,6 @@ Build-Depends: debhelper-compat (= 12),
                unzip,
                autoconf, automake,
                libdaos-dev,
-# DO NOT LAND BELOW -- IT SHOULD BE FIXED IN THE libdaos-dev package
-               uuid-dev,
                libmercury-dev,
                libmpich-dev,
                libhdf5-mpich-dev
