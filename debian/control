@@ -11,6 +11,7 @@ Build-Depends: debhelper-compat (= 12),
                unzip,
                autoconf, automake,
                libdaos-dev,
+               libmercury-dev,
                libmpich-dev,
                libhdf5-mpich-dev
 Standards-Version: 4.4.1.0
