@@ -13,7 +13,8 @@ Build-Depends: debhelper-compat (= 12),
                libdaos-dev,
                libmercury-dev,
                libmpich-dev,
-               libhdf5-mpich-dev
+               libhdf5-mpich-dev,
+               libfabric-dev
 Standards-Version: 4.4.1.0
 Vcs-Browser: https://github.com/hpc/ior
 Vcs-Git: https://github.com/hpc/ior.git
