@@ -1,5 +1,5 @@
 #!/usr/bin/groovy
-/* Copyright (C) 2019 Intel Corporation
+/* Copyright (C) 2019-2023 Intel Corporation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -40,6 +40,5 @@
 // I.e. for testing library changes
 //@Library(value="pipeline-lib@your_branch") _
 
-// no debian/ support yet
 packageBuildingPipelineDAOSTest(['distros' : ['centos7', 'el8', 'leap15', 'ubuntu20.04'],
                                  'test-tag': 'ior'])
