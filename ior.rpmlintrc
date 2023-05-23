@@ -1,0 +1,13 @@
+# This line is mandatory to access the configuration functions
+from Config import *
+
+addFilter('static-library-without-debuginfo')
+addFilter('invalid-locale-man-dir')
+addFilter('binary-or-shlib-defines-rpath')
+addFilter('position-independent-executable-suggested')
+addFilter('invalid-license')
+addFilter('devel-file-in-non-devel-package')
+addFilter('file-not-in-%lang')
+addFilter('incoherent-version-in-changelog')
+addFilter('standard-dir-owned-by-package')
+addFilter('no-manual-page-for-binary')

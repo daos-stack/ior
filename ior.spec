@@ -8,7 +8,7 @@
 
 Name:		ior
 Version:	3.3.0
-Release:	19%{?commit:.g%{shortcommit}}%{?dist}
+Release:	20%{?commit:.g%{shortcommit}}%{?dist}
 
 Summary:	IOR-HPC
 
@@ -18,6 +18,7 @@ Source0:    https://github.com/hpc/%{name}/releases/download/%{version}/%{name}-
 %if "%{?commit}" != ""
 Patch1: %{version}..%{commit}.patch
 %endif
+Patch2: ior_label.patch
 
 BuildRequires: mpich-devel
 BuildRequires: hwloc-devel
@@ -94,6 +95,9 @@ EOF
 
 
 %changelog
+* Wed May 24 2023 Mohamad Chaarawi <mohamad.chaarawi@intel.com> - 3.3.0-20
+- Add patch to remove uuid support
+
 * Fri Mar 18 2022 Brian J. Murrell <brian.murrell@intel.com> - 3.3.0-19
 - Update to d3574d536643475269d37211e283b49ebd6732d7
 
