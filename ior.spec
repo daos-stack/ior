@@ -8,7 +8,7 @@
 
 Name:		ior
 Version:	3.3.0
-Release:	19%{?commit:.g%{shortcommit}}%{?dist}
+Release:	20%{?commit:.g%{shortcommit}}%{?dist}
 
 Summary:	IOR-HPC
 
@@ -18,7 +18,6 @@ Source0:    https://github.com/hpc/%{name}/releases/download/%{version}/%{name}-
 %if "%{?commit}" != ""
 Patch1: %{version}..%{commit}.patch
 %endif
-Patch2: hdf5-pkg-config.patch
 Patch3: daos-configure.patch
 
 BuildRequires: mpich-devel
@@ -28,6 +27,7 @@ BuildRequires: unzip
 BuildRequires: autoconf, automake
 BuildRequires: daos-devel
 BuildRequires: hdf5-mpich-devel%{?_isa}
+BuildRequires: mercury-devel
 %if (0%{?suse_version} >= 1500)
 BuildRequires: lua-lmod
 %else
@@ -96,6 +96,9 @@ EOF
 
 
 %changelog
+* Thu May 25 2023 Brian J. Murrell <brian.murrell@intel.com> - 3.3.0-20
+- Add BR: mercury-devel
+
 * Fri Mar 18 2022 Brian J. Murrell <brian.murrell@intel.com> - 3.3.0-19
 - Update to d3574d536643475269d37211e283b49ebd6732d7
 
