@@ -42,5 +42,5 @@
 
 // hdf5 not building for Ubuntu yet
 //packageBuildingPipelineDAOSTest(['distros' : ['centos7', 'el8', 'el9', 'leap15', 'ubuntu20.04'],
-packageBuildingPipelineDAOSTest(['distros' : ['el8', 'el9', 'leap15'],
+packageBuildingPipelineDAOSTest(['distros' : ['centos7', 'el8', 'el9', 'leap15'],
                                  'test-tag': 'ior'])
