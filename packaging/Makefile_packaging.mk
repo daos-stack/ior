@@ -37,7 +37,7 @@ REPO_NAME ?= $(NAME)
 
 PR_REPOS                 ?= $(shell git show -s --format=%B | sed -ne 's/^PR-repos: *\(.*\)/\1/p')
 LEAP_15_PR_REPOS         ?= $(shell git show -s --format=%B | sed -ne 's/^PR-repos-leap15: *\(.*\)/\1/p')
-EL_7_PR_REPOS            ?= $(shell git show -s --format=%B | sed -ne 's/^PR-repos-el7: *\(.*\)/\1/p')
+EL_7_PR_REPOS            ?= $(subst /,%2F,$(shell git show -s --format=%B | sed -ne 's/^PR-repos-el7: *\(.*\)/\1/p'))
 EL_8_PR_REPOS            ?= $(shell git show -s --format=%B | sed -ne 's/^PR-repos-el8: *\(.*\)/\1/p')
 EL_9_PR_REPOS            ?= $(shell git show -s --format=%B | sed -ne 's/^PR-repos-el9: *\(.*\)/\1/p')
 UBUNTU_20_04_PR_REPOS    ?= $(shell git show -s --format=%B | sed -ne 's/^PR-repos-ubuntu20: *\(.*\)/\1/p')
