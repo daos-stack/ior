@@ -1,0 +1,15 @@
+#! /usr/bin/make -f
+
+export DH_VERBOSE=1
+
+DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	dh_auto_configure -- --with-mpiio --with-daos=/usr --with-hdf5 --datadir=/usr/share/doc/ior/
+
+override_dh_auto_install-arch:
+	dh_auto_install -a
+	chrpath -d debian/ior/usr/bin/*

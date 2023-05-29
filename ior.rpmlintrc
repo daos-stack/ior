@@ -1,0 +1,7 @@
+# This line is mandatory to access the configuration functions
+from Config import *
+
+addFilter('ior.x86_64: E: invalid-locale-man-dir /usr/share/man/mpich-x86_64/man1/mdtest.1.gz')
+addFilter('ior.x86_64: E: binary-or-shlib-defines-rpath /usr/lib64/mpich/bin/ior \(RUNPATH: check/lib64:/usr/lib64:/usr/lib64/mpich/lib\)')
+addFilter('ior.x86_64: E: binary-or-shlib-defines-rpath /usr/lib64/mpich/bin/md-workbench \(RUNPATH: check/lib64:/usr/lib64:/usr/lib64/mpich/lib\)')
+addFilter('ior.x86_64: E: binary-or-shlib-defines-rpath /usr/lib64/mpich/bin/mdtest \(RUNPATH: check/lib64:/usr/lib64:/usr/lib64/mpich/lib\)')

@@ -1,0 +1,50 @@
+--- a/configure.ac	2023-01-27 15:43:27.815008155 -0500
++++ b/configure.ac	2023-01-27 15:55:15.980795957 -0500
+@@ -166,6 +166,8 @@
+ ])
+ 
+ # HDF5 support
++PKG_CHECK_MODULES([HDF5], [hdf5])
++
+ AC_ARG_WITH([hdf5],
+         [AS_HELP_STRING([--with-hdf5],
+            [support IO with HDF5 backend @<:@default=no@:>@])],
+@@ -173,10 +175,18 @@
+         [with_hdf5=no])
+ AM_CONDITIONAL([USE_HDF5_AIORI], [test x$with_hdf5 = xyes])
+ AM_COND_IF([USE_HDF5_AIORI],[
++	OLD_CFLAGS="$CFLAGS"
++	OLD_LIBS="$LIBS"
++	CFLAGS="$CFLAGS $HDf5_CFLAGS"
++	LIBS="$LDLIBS $HDF5_LIBS"
+         AC_DEFINE([USE_HDF5_AIORI], [], [Build HDF5 backend AIORI])
+ 	AC_SEARCH_LIBS([H5Pset_all_coll_metadata_ops], [hdf5])
+ 	AC_CHECK_FUNCS([H5Pset_all_coll_metadata_ops])
++	LIBS="$OLD_LIBS"
++	CFLAGS="$OLD_CFLAGS"
+ ])
++AC_SUBST(HDF5_CFLAGS)
++AC_SUBST(HDF5_LIBS)
+ 
+ 
+ 
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -51,7 +51,8 @@
+ 
+ if USE_HDF5_AIORI
+ extraSOURCES  += aiori-HDF5.c
++extraCPPFLAGS += $(HDF5_CFLAGS)
+-extraLDADD    += -lhdf5 -lz
++extraLDADD    += -lhdf5 -lz $(HDF5_LIBS)
+ endif
+ 
+ if USE_IME_AIORI
+--- a/src/test/Makefile.am
++++ b/src/test/Makefile.am
+@@ -1,4 +1,4 @@
+ AM_LDFLAGS = $(extraLDFLAGS)
+-LDADD    = ../libaiori.a $(extraLDADD)
++LDADD    = ../libaiori.a $(extraLDADD) $(HDF5_LIBS)
+ 
+ # Add test here

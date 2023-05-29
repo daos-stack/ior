@@ -8,7 +8,7 @@
 
 Name:		ior
 Version:	3.3.0
-Release:	19%{?commit:.g%{shortcommit}}%{?dist}
+Release:	20%{?commit:.g%{shortcommit}}%{?dist}
 
 Summary:	IOR-HPC
 
@@ -18,6 +18,7 @@ Source0:    https://github.com/hpc/%{name}/releases/download/%{version}/%{name}-
 %if "%{?commit}" != ""
 Patch1: %{version}..%{commit}.patch
 %endif
+Patch3: daos-configure.patch
 
 BuildRequires: mpich-devel
 BuildRequires: hwloc-devel
@@ -26,6 +27,7 @@ BuildRequires: unzip
 BuildRequires: autoconf, automake
 BuildRequires: daos-devel
 BuildRequires: hdf5-mpich-devel%{?_isa}
+BuildRequires: mercury-devel
 %if (0%{?suse_version} >= 1500)
 BuildRequires: lua-lmod
 %else
@@ -53,14 +55,18 @@ autoreconf
 %endif
 
 %build
+export CC=mpicc
+export CXX=mpicxx
+export FC=mpif90
+export F77=mpif77
+export CFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing -fPIC"
+export CXXFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing -fPIC"
 if [ ! -f configure ]; then
     # probably a git tarball
     ./bootstrap
 fi
 
 %module_load mpich
-echo $PATH
-set -x
 %if (0%{?suse_version} >= 1)
 %configure --with-mpiio --with-daos=/usr --with-hdf5
 %else
@@ -71,11 +77,11 @@ set -x
 %install
 %module_load mpich
 %make_install
+rm -f %{buildroot}/$MPI_LIB/libaiori.a
 
 %if (0%{?suse_version} < 1)
 cat <<EOF >> files.mpich
 $MPI_BIN/*
-$MPI_LIB/*
 $MPI_MAN/man1/*
 %{_datadir}/doc/ior-mpich/*
 EOF
@@ -94,6 +100,11 @@ EOF
 
 
 %changelog
+* Fri May 26 2023 Brian J. Murrell <brian.murrell@intel.com> - 3.3.0-20
+- Add BR: mercury-devel
+- Remove static library
+- Set compiler environment variables
+
 * Fri Mar 18 2022 Brian J. Murrell <brian.murrell@intel.com> - 3.3.0-19
 - Update to d3574d536643475269d37211e283b49ebd6732d7
 
