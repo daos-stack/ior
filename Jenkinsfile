@@ -42,4 +42,4 @@
 
 /* groovylint-disable-next-line CompileStatic */
 packageBuildingPipelineDAOSTest(['distros' : ['centos7', 'el8', 'el9', 'leap15'],
-                                 'test-tag': 'ior'])
+                                 'test-tag': 'ior mdtest'])

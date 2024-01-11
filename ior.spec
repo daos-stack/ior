@@ -7,8 +7,8 @@
 %global shortcommit %(c=%{commit};echo ${c:0:7})
 
 Name:		ior
-Version:	3.3.0
-Release:	20%{?commit:.g%{shortcommit}}%{?dist}
+Version:	4.0.0rc1
+Release:	1%{?commit:.g%{shortcommit}}%{?dist}
 
 Summary:	IOR-HPC
 
@@ -107,6 +107,9 @@ EOF
 %endif
 
 %changelog
+* Thu Jan 11 2024 Dalton A. Bohning <dalton.bohning@intel.com> - 4.0.0rc1-1
+- Update to latest release candidate 4.0.0rc1 + patch latest tip
+
 * Tue Jul 04 2023 Brian J. Murrell <brian.murrell@intel.com> - 3.3.0-20
 - Add BR: mercury-devel
 - Remove static library

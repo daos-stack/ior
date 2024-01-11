@@ -1,0 +1,2702 @@
+diff --git a/META b/META
+index 3f367c4..08aadad 100755
+--- a/META
++++ b/META
+@@ -1,3 +1,3 @@
+ Package: ior
+-Version: 4.0.0rc1
++Version: 4.1.0+dev
+ Release: 0
+diff --git a/NEWS b/NEWS
+index b036f2c..b61bfa4 100644
+--- a/NEWS
++++ b/NEWS
+@@ -1,4 +1,13 @@
+-Version 4.0.0rc1+dev
++Version 4.1.0+dev
++--------------------------------------------------------------------------------
++
++New major features:
++
++New minor features:
++
++Bugfixes:
++
++Version 4.0.0
+ --------------------------------------------------------------------------------
+ 
+ New major features:
+diff --git a/README_HDF5 b/README_HDF5
+new file mode 100644
+index 0000000..2f0aa6b
+--- /dev/null
++++ b/README_HDF5
+@@ -0,0 +1,77 @@
++Building
++--------
++
++If the HDF5 library is installed in a standard location on the
++system, the following should suffice for building IOR with HDF5
++support: 
++
++./bootstrap
++./configure [other options] --with-hdf5
++
++If the HDF5 library is installed in a non-standard location, one
++may need to point IOR to their installed HDF5 using the CFLAGS
++and LDFLAGS environment variables. For example,
++
++./bootstrap
++./configure [other options] --with-hdf5 CFLAGS="-I /path/to/installed/hdf5/include" LDFLAGS="-L /path/to/installed/hdf5/lib"
++
++
++Running
++-------
++
++ior -a HDF5 [ior options] [hdf5 options]
++
++
++HDF5-specific options
++---------------------
++
++--hdf5.collectiveMetadata[=1]   (default: off/0)
++
++Instructs the HDF5 I/O interface to enable collective reading of metadata by way of
++the H5Pset_all_coll_metadata_ops (http://portal.hdfgroup.org/display/HDF5/H5P_SET_ALL_COLL_METADATA_OPS)
++API routine. Refer to https://portal.hdfgroup.org/pages/viewpage.action?pageId=50076863
++for more information about collective metadata I/O in HDF5 and why one may wish to
++enable this feature.
++
++
++--hdf5.showHints[=1]   (default: off/0)
++
++Instructs the HDF5 I/O interface to display the MPI hints that were passed to HDF5.
++
++
++--hdf5.individualDataSets   (not currently functional)
++
++Instructs the HDF5 I/O interface to assign a single dataset per task, rather than all
++tasks performing I/O on a single shared dataset.
++
++
++--hdf5.noFill[=1]   (default: 0)
++
++Instructs the HDF5 I/O interface to avoid pre-filling HDF5 datasets with fill value data
++by setting dataset fill times to H5D_FILL_TIME_NEVER. Refer to
++http://portal.hdfgroup.org/display/HDF5/H5P_SET_FILL_TIME for more information on HDF5
++fill times.
++
++
++--hdf5.hintsFileName=STRING
++
++Specifies the full name of a file containing key-value strings for MPI hints to be passed
++to HDF5 via H5Pset_fapl_mpio. Refer to the IOR FAQ (https://ior.readthedocs.io/en/latest/userDoc/faq.html)
++for information on the format of these strings.
++
++
++--hdf5.setAlignment=A
++
++Specifies the alignment 'A' in bytes (e.g.: 8, 4k, 2m, 1g) of objects in HDF5 files.
++Refer to http://portal.hdfgroup.org/display/HDF5/H5P_SET_ALIGNMENT for more information
++about HDF5 file object alignment.
++
++
++--hdf5.chunkSize=S
++
++Specifies the size 'S' (in terms of dataset elements) of data chunks within HDF5 datasets.
++Note that achieving good I/O performance for chunked HDF5 datasets can involve fine-tuning
++of the relationship between the HDF5 data chunk size and the block and transfer sizes
++used for IOR, among other factors. Refer to http://portal.hdfgroup.org/display/HDF5/Chunking+in+HDF5
++for more information about data chunking in HDF5.
++
+diff --git a/configure.ac b/configure.ac
+index 33dce2e..0464a0e 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -83,7 +83,7 @@ AC_ARG_WITH([cuda],
+         [], [with_cuda=check])
+ 
+ AS_IF([test "x$with_cuda" != xno], [
+-        LDFLAGS="$LDFLAGS -L$with_cuda/lib64 -Wl,--enable-new-dtags -Wl,-rpath=$with_cuda/lib64"
++        LDFLAGS="$LDFLAGS -L$with_cuda/lib64 -L$with_cuda/lib -Wl,--enable-new-dtags -Wl,-rpath=$with_cuda/lib64:$with_cuda/lib"
+         CPPFLAGS="$CPPFLAGS -I$with_cuda/include"
+ 
+         AC_CHECK_HEADERS([cuda_runtime.h], [AC_DEFINE([HAVE_CUDA], [], [CUDA GPU API found])], [
+@@ -96,7 +96,7 @@ AS_IF([test "$ac_cv_header_cuda_runtime_h" = "yes"], [
+         [AC_MSG_ERROR([Library containing cudaMalloc symbol not found])])
+     ])
+ ])
+-AM_CONDITIONAL([HAVE_CUDA], [test x$with_cuda = xyes])
++AM_CONDITIONAL([HAVE_CUDA], [test x$ac_cv_search_cudaMalloc != x ])
+ AM_COND_IF([HAVE_CUDA],[AC_DEFINE([HAVE_CUDA], [], [CUDA GPU API found])])
+ 
+ # Check for GPUDirect
+@@ -106,30 +106,41 @@ AC_ARG_WITH([gpuDirect],
+         [], [with_gpuDirect=check])
+ 
+ AS_IF([test "x$with_gpuDirect" != xno], [
+-        LDFLAGS="$LDFLAGS -L$with_gpuDirect/lib64 -Wl,--enable-new-dtags -Wl,-rpath=$with_gpuDirect/lib64"
++        LDFLAGS="$LDFLAGS -L$with_gpuDirect/lib64 -L$with_gpuDirect/lib -Wl,--enable-new-dtags -Wl,-rpath=$with_gpuDirect/lib64:$with_gpuDirect/lib"
+         CPPFLAGS="$CPPFLAGS -I$with_gpuDirect/include"
+ 
+-        AC_CHECK_HEADERS([cufile.h], [AC_DEFINE([HAVE_GPU_DIRECT], [], [GPUDirect API found])], [
++        AC_CHECK_HEADERS([cufile.h], [], [                
+                 if test "x$with_gpuDirect" != xcheck; then
+-                        AC_MSG_FAILURE([--with-gpuDirect was given, <cufile.h> not found])
++                        AC_MSG_FAILURE([--with-gpuDirect was given, <cufile.h> not found])                       
+                 fi
++                with_gpuDirect=no
++        ])
++        AS_IF([test "$ac_cv_header_cufile_h" = "yes"], [
++                AC_SEARCH_LIBS([cuFileDriverOpen], [cufile], [], [
++                        AC_MSG_WARN([Library containing cuFileDriverOpen symbol not found])
++                        with_gpuDirect=no
++                ])
+         ])
+-AS_IF([test "$ac_cv_header_cufile_h" = "yes"], [
+-        AC_SEARCH_LIBS([cuFileDriverOpen], [cufile], [],
+-        [AC_MSG_ERROR([Library containing cuFileDriverOpen symbol not found])])
+-    ])
+ ])
+-AM_CONDITIONAL([HAVE_GPU_DIRECT], [test x$with_gpuDirect = xyes])
++
++# Check for NVCC
++NVCC=nvcc
++AC_ARG_VAR(varNVCC, "Name/path of the NVIDIA compiler")
++AC_ARG_WITH([nvcc],
++              AS_HELP_STRING([--with-nvcc], [Use the NVCC as specified]),
++              [AS_IF([test "$with_nvcc" != "yes"], NVCC=$with_nvcc)],
++              [], [with_nvcc=check])
++
++AC_PATH_PROG(NVCC, nvcc)
++AM_CONDITIONAL([HAVE_NVCC], test -n "$NVCC")
++
++# Use GPU Direct only if NVCC and HAVE_GPU_DIRECT is supported
++AM_CONDITIONAL([HAVE_GPU_DIRECT], test x$with_gpuDirect != xno -a x$NVCC != x )
+ AM_COND_IF([HAVE_GPU_DIRECT],[
+   AC_DEFINE([HAVE_GPU_DIRECT], [], [GPUDirect API found])
+   ])
+ 
+-varNVCC=nvcc
+-AC_ARG_WITH(nvcc,
+-              AS_HELP_STRING([--with-nvcc], [Use the NVCC as specified]),
+-              [AS_IF([test "$with_nvcc" != "yes"], varNVCC=$with_nvcc)],
+-              [])
+-AC_SUBST(NVCC, $varNVCC)
++
+ 
+ # Check for system capabilities
+ AC_SYS_LARGEFILE
+@@ -201,6 +212,9 @@ AM_COND_IF([USE_HDF5_AIORI],[
+         AC_DEFINE([USE_HDF5_AIORI], [], [Build HDF5 backend AIORI])
+ 	AC_SEARCH_LIBS([H5Pset_all_coll_metadata_ops], [hdf5])
+ 	AC_CHECK_FUNCS([H5Pset_all_coll_metadata_ops])
++	AC_CHECK_FUNCS([H5Pget_vol_id])
++	AC_CHECK_FUNCS([H5Fis_accessible])
++	AC_CHECK_FUNCS([H5Fdelete])
+ ])
+ 
+ 
+@@ -364,6 +378,14 @@ PKG_CHECK_MODULES([CHFS], [chfs],
+   [with_chfs=no])
+ AM_CONDITIONAL([USE_CHFS_AIORI], [test x$with_chfs != xno])
+ 
++# FINCHFS support
++PKG_CHECK_MODULES([FINCHFS], [finchfs],
++  [AC_DEFINE([USE_FINCHFS_AIORI], [], [Build FINCHFS backend AIORI])
++   FINCHFS_RPATH=$(pkg-config --libs-only-L finchfs | sed 's/-L/-Wl,-rpath=/g')
++   AC_SUBST(FINCHFS_RPATH)],
++  [with_finchfs=no])
++AM_CONDITIONAL([USE_FINCHFS_AIORI], [test x$with_finchfs != xno])
++
+ # aws4c is needed for the S3 backend (see --with-S3, below).
+ # Version 0.5.2 of aws4c is available at https://github.com/jti-lanl/aws4c.git
+ # Install it something like this:
+diff --git a/doc/mdtest.1 b/doc/mdtest.1
+index 27d4d7b..870ff2f 100644
+--- a/doc/mdtest.1
++++ b/doc/mdtest.1
+@@ -156,7 +156,7 @@ tree creation rate: 12826.617737 ops/sec
+ 
+ 2 tasks, 200 files/directories
+ 
+-SUMMARY: (of 2 iterations)
++SUMMARY (in ops/sec): (of 2 iterations)
+    Operation                  Max        Min       Mean    Std Dev
+    ---------                  ---        ---       ----    -------
+    Directory creation:  21489.415  17447.551  19468.483   2020.932
+diff --git a/doc/sphinx/userDoc/options.rst b/doc/sphinx/userDoc/options.rst
+index 1513dd0..8350a45 100644
+--- a/doc/sphinx/userDoc/options.rst
++++ b/doc/sphinx/userDoc/options.rst
+@@ -266,13 +266,15 @@ MPIIO-ONLY
+ HDF5-ONLY
+ ^^^^^^^^^
+ 
+-  * ``individualDataSets`` - within a single file, each task will access its own
++  * ``hdf5.individualDataSets`` - within a single file, each task will access its own
+     dataset.  Default IOR creates a dataset the size of ``numTasks * blockSize``
+     to be accessed by all tasks (default: 0)
+ 
+-  * ``noFill`` - do not pre-fill data in HDF5 file creation (default: 0)
++  * ``hdf5.noFill`` - do not pre-fill data in HDF5 file creation (default: 0)
+ 
+-  * ``setAlignment`` - set the HDF5 alignment in bytes (e.g.: 8, 4k, 2m, 1g) (default: 1)
++  * ``hdf5.setAlignment`` - set the HDF5 alignment in bytes (e.g.: 8, 4k, 2m, 1g) (default: 1)
++
++  * ``hdf5.chunkSize`` - set the HDF5 chunk size (in terms of dataset elements) (default: no chunking)
+ 
+   * ``hdf5.collectiveMetadata`` - enable HDF5 collective metadata (available since HDF5-1.10.0)
+ 
+diff --git a/doc/sphinx/userDoc/scripts.rst b/doc/sphinx/userDoc/scripts.rst
+index 14e00e0..a7314ab 100644
+--- a/doc/sphinx/userDoc/scripts.rst
++++ b/doc/sphinx/userDoc/scripts.rst
+@@ -21,8 +21,10 @@ get applied until after the ``-f`` option (and its constituent runs) are complet
+ Input scripts are specified using the long-form option names that correspond to
+ each command-line option.  In addition to long-form options,
+ 
+-    * ``IOR START`` and ``IOR END`` mark the beginning and end of the script
+-    * ``RUN`` dispatches the test using all of the options specified before it
++    * ``IOR START`` and ``IOR STOP`` (case-insensitive) mark the beginning and
++      end of the script.
++    * ``RUN`` (case-insensitive) dispatches the test using all of the options
++      specified before it.
+     * All previous set parameter stay set for the next test. They are not reset
+       to the default! For default the must be rest manually.
+     * White space is ignored in script, as are comments starting with ``#``.
+diff --git a/doc/sphinx/userDoc/tutorial.rst b/doc/sphinx/userDoc/tutorial.rst
+index 70d4aa3..dc809db 100644
+--- a/doc/sphinx/userDoc/tutorial.rst
++++ b/doc/sphinx/userDoc/tutorial.rst
+@@ -15,7 +15,7 @@ There are two ways of running IOR:
+ 
+        .. code-block:: shell
+ 
+-        $ ./IOR -w -r -o filename
++        $ ./ior -w -r -o filename
+ 
+        This performs a write and a read to the file 'filename'.
+ 
+@@ -26,7 +26,7 @@ There are two ways of running IOR:
+ 
+        .. code-block:: shell
+ 
+-        $ ./IOR -W -f script
++        $ ./ior -W -f script
+ 
+        This defaults all tests in 'script' to use write data checking.
+ 
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 9d225a8..a7b47bc 100755
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -46,7 +46,7 @@ extraLDADD    += -lcudart
+ endif
+ 
+ if HAVE_GPU_DIRECT
+-extraLDADD    += -lcufile
++extraLDADD    += -lcufile -lstdc++
+ extraSOURCES  += utilities-gpu.cu
+ endif
+ 
+@@ -117,6 +117,13 @@ extraLDFLAGS += @CHFS_RPATH@
+ extraLDADD += @CHFS_LIBS@
+ endif
+ 
++if USE_FINCHFS_AIORI
++extraSOURCES += aiori-FINCHFS.c
++extraCPPFLAGS += @FINCHFS_CFLAGS@
++extraLDFLAGS += @FINCHFS_RPATH@
++extraLDADD += @FINCHFS_LIBS@
++endif
++
+ if USE_S3_4C_AIORI
+ extraSOURCES  += aiori-S3-4c.c
+ if AWS4C_DIR
+diff --git a/src/aiori-DFS.c b/src/aiori-DFS.c
+index 23741e1..e3092ee 100755
+--- a/src/aiori-DFS.c
++++ b/src/aiori-DFS.c
+@@ -63,6 +63,28 @@ enum handleType {
+         CONT_HANDLE,
+ 	DFS_HANDLE
+ };
++/**************************** P R O T O T Y P E S *****************************/
++static void DFS_Init(aiori_mod_opt_t *);
++static void DFS_Finalize(aiori_mod_opt_t *);
++static aiori_fd_t *DFS_Create(char *, int, aiori_mod_opt_t *);
++static aiori_fd_t *DFS_Open(char *, int, aiori_mod_opt_t *);
++static IOR_offset_t DFS_Xfer(int, aiori_fd_t *, IOR_size_t *, IOR_offset_t,
++                             IOR_offset_t, aiori_mod_opt_t *);
++static void DFS_Close(aiori_fd_t *, aiori_mod_opt_t *);
++static void DFS_Delete(char *, aiori_mod_opt_t *);
++static char* DFS_GetVersion();
++static void DFS_Fsync(aiori_fd_t *, aiori_mod_opt_t *);
++static void DFS_Sync(aiori_mod_opt_t *);
++static IOR_offset_t DFS_GetFileSize(aiori_mod_opt_t *, char *);
++static int DFS_Statfs (const char *, ior_aiori_statfs_t *, aiori_mod_opt_t *);
++static int DFS_Stat (const char *, struct stat *, aiori_mod_opt_t *);
++static int DFS_Mkdir (const char *, mode_t, aiori_mod_opt_t *);
++static int DFS_Rename(const char *, const char *, aiori_mod_opt_t *);
++static int DFS_Rmdir (const char *, aiori_mod_opt_t *);
++static int DFS_Access (const char *, int, aiori_mod_opt_t *);
++static option_help * DFS_options(aiori_mod_opt_t **, aiori_mod_opt_t *);
++static void DFS_init_xfer_options(aiori_xfer_hint_t *);
++static int DFS_check_params(aiori_mod_opt_t *);
+ 
+ /************************** O P T I O N S *****************************/
+ typedef struct {
+@@ -89,9 +111,9 @@ static option_help * DFS_options(aiori_mod_opt_t ** init_backend_options,
+         *init_backend_options = (aiori_mod_opt_t *) o;
+ 
+         option_help h [] = {
+-                {0, "dfs.pool", "Pool label or uuid", OPTION_OPTIONAL_ARGUMENT, 's', &o->pool},
++                {0, "dfs.pool", "Pool label", OPTION_OPTIONAL_ARGUMENT, 's', &o->pool},
+                 {0, "dfs.group", "DAOS system name", OPTION_OPTIONAL_ARGUMENT, 's', &o->group},
+-                {0, "dfs.cont", "Container label or uuid", OPTION_OPTIONAL_ARGUMENT, 's', &o->cont},
++                {0, "dfs.cont", "Container label", OPTION_OPTIONAL_ARGUMENT, 's', &o->cont},
+                 {0, "dfs.chunk_size", "File chunk size in bytes (e.g.: 8, 4k, 2m, 1g)", OPTION_OPTIONAL_ARGUMENT, 'd', &o->chunk_size},
+                 {0, "dfs.oclass", "File object class", OPTION_OPTIONAL_ARGUMENT, 's', &o->oclass},
+                 {0, "dfs.dir_oclass", "Directory object class", OPTION_OPTIONAL_ARGUMENT, 's',
+@@ -106,28 +128,6 @@ static option_help * DFS_options(aiori_mod_opt_t ** init_backend_options,
+         return help;
+ }
+ 
+-/**************************** P R O T O T Y P E S *****************************/
+-static void DFS_Init(aiori_mod_opt_t *);
+-static void DFS_Finalize(aiori_mod_opt_t *);
+-static aiori_fd_t *DFS_Create(char *, int, aiori_mod_opt_t *);
+-static aiori_fd_t *DFS_Open(char *, int, aiori_mod_opt_t *);
+-static IOR_offset_t DFS_Xfer(int, aiori_fd_t *, IOR_size_t *, IOR_offset_t,
+-                             IOR_offset_t, aiori_mod_opt_t *);
+-static void DFS_Close(aiori_fd_t *, aiori_mod_opt_t *);
+-static void DFS_Delete(char *, aiori_mod_opt_t *);
+-static char* DFS_GetVersion();
+-static void DFS_Fsync(aiori_fd_t *, aiori_mod_opt_t *);
+-static void DFS_Sync(aiori_mod_opt_t *);
+-static IOR_offset_t DFS_GetFileSize(aiori_mod_opt_t *, char *);
+-static int DFS_Statfs (const char *, ior_aiori_statfs_t *, aiori_mod_opt_t *);
+-static int DFS_Stat (const char *, struct stat *, aiori_mod_opt_t *);
+-static int DFS_Mkdir (const char *, mode_t, aiori_mod_opt_t *);
+-static int DFS_Rename(const char *, const char *, aiori_mod_opt_t *);
+-static int DFS_Rmdir (const char *, aiori_mod_opt_t *);
+-static int DFS_Access (const char *, int, aiori_mod_opt_t *);
+-static option_help * DFS_options();
+-static void DFS_init_xfer_options(aiori_xfer_hint_t *);
+-static int DFS_check_params(aiori_mod_opt_t *);
+ 
+ /************************** D E C L A R A T I O N S ***************************/
+ 
+@@ -172,7 +172,7 @@ do {                                                                    \
+         }                                                               \
+ } while (0)
+ 
+-#define INFO(level, format, ...)					\
++#define DINFO(level, format, ...)					\
+ do {                                                                    \
+         if (verbose >= level)						\
+                 printf("[%d] "format"\n", rank, ##__VA_ARGS__);         \
+@@ -462,7 +462,6 @@ DFS_Init(aiori_mod_opt_t * options)
+ {
+         DFS_options_t *o = (DFS_options_t *)options;
+         bool pool_connect, cont_create, cont_open, dfs_mounted;
+-        uuid_t co_uuid;
+ 	int rc;
+ 
+         dfs_init_count++;
+@@ -513,45 +512,23 @@ DFS_Init(aiori_mod_opt_t * options)
+                 daos_pool_info_t pool_info;
+                 daos_cont_info_t co_info;
+ 
+-                INFO(VERBOSE_1, "DFS Pool = %s", o->pool);
+-                INFO(VERBOSE_1, "DFS Container = %s", o->cont);
++                DINFO(VERBOSE_1, "DFS Pool = %s", o->pool);
++                DINFO(VERBOSE_1, "DFS Container = %s", o->cont);
+ 
+-#if CHECK_DAOS_API_VERSION(1, 4)
+                 rc = daos_pool_connect(o->pool, o->group, DAOS_PC_RW, &poh, &pool_info, NULL);
+                 DCHECK(rc, "Failed to connect to pool %s", o->pool);
+                 pool_connect = true;
+ 
+                 rc = daos_cont_open(poh, o->cont, DAOS_COO_RW, &coh, &co_info, NULL);
+-#else
+-                uuid_t pool_uuid;
+-
+-                rc = uuid_parse(o->pool, pool_uuid);
+-                DCHECK(rc, "Failed to parse 'Pool uuid': %s", o->pool);
+-                rc = uuid_parse(o->cont, co_uuid);
+-                DCHECK(rc, "Failed to parse 'Cont uuid': %s", o->cont);
+-
+-                rc = daos_pool_connect(pool_uuid, o->group, DAOS_PC_RW, &poh, &pool_info, NULL);
+-                DCHECK(rc, "Failed to connect to pool %s", o->pool);
+-                pool_connect = true;
+-
+-                rc = daos_cont_open(poh, co_uuid, DAOS_COO_RW, &coh, &co_info, NULL);
+-#endif
+                 /* If NOEXIST we create it */
+                 if (rc == -DER_NONEXIST) {
+-                        INFO(VERBOSE_1, "Creating DFS Container ...\n");
+-#if CHECK_DAOS_API_VERSION(1, 4)
+-                        if (uuid_parse(o->cont, co_uuid) != 0)
+-                                /** user passes in label */
+-                                rc = dfs_cont_create_with_label(poh, o->cont, NULL, &co_uuid, &coh, NULL);
+-                        else
+-                                /** user passes in uuid */
+-#endif
+-                        rc = dfs_cont_create(poh, co_uuid, NULL, &coh, NULL);
++                        DINFO(VERBOSE_1, "Creating DFS Container ...\n");
++                        rc = dfs_cont_create_with_label(poh, o->cont, NULL, NULL, &coh, NULL);
+                         if (rc)
+                                 DCHECK(rc, "Failed to create container");
+                         cont_create = true;
+                 } else if (rc) {
+-                        DCHECK(rc, "Failed to create container");
++                        DCHECK(rc, "Failed to open container %s", o->cont);
+                 }
+                 cont_open = true;
+ 
+@@ -579,11 +556,7 @@ out:
+                 if (cont_open)
+                         daos_cont_close(coh, NULL);
+                 if (cont_create && rank == 0) {
+-#if CHECK_DAOS_API_VERSION(1, 4)
+                         daos_cont_destroy(poh, o->cont, 1, NULL);
+-#else
+-                        daos_cont_destroy(poh, co_uuid, 1, NULL);
+-#endif
+                 }
+                 if (pool_connect)
+                         daos_pool_disconnect(poh, NULL);
+@@ -633,14 +606,8 @@ DFS_Finalize(aiori_mod_opt_t *options)
+ 
+ 	if (o->destroy) {
+                 if (rank == 0) {
+-                        INFO(VERBOSE_1, "Destroying DFS Container: %s", o->cont);
+-#if CHECK_DAOS_API_VERSION(1, 4)
++                        DINFO(VERBOSE_1, "Destroying DFS Container: %s", o->cont);
+                         daos_cont_destroy(poh, o->cont, 1, NULL);
+-#else
+-                        uuid_t uuid;
+-                        uuid_parse(o->cont, uuid);
+-                        rc = daos_cont_destroy(poh, uuid, 1, NULL);
+-#endif
+                         DCHECK(rc, "Failed to destroy container %s", o->cont);
+                 }
+ 
+@@ -652,7 +619,7 @@ DFS_Finalize(aiori_mod_opt_t *options)
+         }
+ 
+         if (rank == 0)
+-                INFO(VERBOSE_1, "Disconnecting from DAOS POOL");
++                DINFO(VERBOSE_1, "Disconnecting from DAOS POOL");
+ 
+         rc = daos_pool_disconnect(poh, NULL);
+         DCHECK(rc, "Failed to disconnect from pool");
+@@ -660,7 +627,7 @@ DFS_Finalize(aiori_mod_opt_t *options)
+ 	MPI_CHECK(MPI_Barrier(testComm), "barrier error");
+ 
+         if (rank == 0)
+-                INFO(VERBOSE_1, "Finalizing DAOS..");
++                DINFO(VERBOSE_1, "Finalizing DAOS..");
+ 
+ 	rc = daos_fini();
+         DCHECK(rc, "Failed to finalize DAOS");
+diff --git a/src/aiori-FINCHFS.c b/src/aiori-FINCHFS.c
+new file mode 100644
+index 0000000..74f2026
+--- /dev/null
++++ b/src/aiori-FINCHFS.c
+@@ -0,0 +1,260 @@
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <finchfs.h>
++#include "ior.h"
++#include "aiori.h"
++
++static aiori_xfer_hint_t *hints = NULL;
++
++struct FINCHFS_File {
++	int fd;
++};
++
++struct finchfs_option {
++	size_t chunk_size;
++};
++
++option_help *
++FINCHFS_options(aiori_mod_opt_t **init_backend_options,
++	aiori_mod_opt_t *init_values)
++{
++	struct finchfs_option *o = malloc(sizeof(*o));
++
++	if (init_values != NULL)
++		memcpy(o, init_values, sizeof(*o));
++	else
++		memset(o, 0, sizeof(*o));
++
++	if (o->chunk_size > 0)
++		finchfs_set_chunk_size(o->chunk_size);
++
++	*init_backend_options = (aiori_mod_opt_t *)o;
++
++	option_help h[] = {
++	    {0, "finchfs.chunk_size", "chunk size", OPTION_FLAG, 'd',
++		    &o->chunk_size},
++	    LAST_OPTION
++	};
++	option_help *help = malloc(sizeof(h));
++	memcpy(help, h, sizeof(h));
++
++	return (help);
++}
++
++void
++FINCHFS_xfer_hints(aiori_xfer_hint_t *params)
++{
++	hints = params;
++}
++
++void
++FINCHFS_initialize()
++{
++	finchfs_init(NULL);
++}
++
++void
++FINCHFS_finalize()
++{
++	finchfs_term();
++}
++
++aiori_fd_t *
++FINCHFS_create(char *fn, int flags, aiori_mod_opt_t *param)
++{
++	struct FINCHFS_File *bf;
++	int fd;
++
++	if (hints->dryRun)
++		return (NULL);
++
++	fd = finchfs_create(fn, flags, 0664);
++	if (fd < 0)
++		ERR("finchfs_create failed");
++	bf = malloc(sizeof(*bf));
++	bf->fd = fd;
++
++	return ((aiori_fd_t *)bf);
++}
++
++aiori_fd_t *
++FINCHFS_open(char *fn, int flags, aiori_mod_opt_t *param)
++{
++	struct FINCHFS_File *bf;
++	int fd;
++
++	if (hints->dryRun)
++		return (NULL);
++
++	fd = finchfs_open(fn, flags);
++	if (fd < 0)
++		ERR("finchfs_open failed");
++	bf = malloc(sizeof(*bf));
++	bf->fd = fd;
++
++	return ((aiori_fd_t *)bf);
++}
++
++IOR_offset_t
++FINCHFS_xfer(int access, aiori_fd_t *fd, IOR_size_t *buffer,
++	IOR_offset_t len, IOR_offset_t offset, aiori_mod_opt_t *param)
++{
++	struct FINCHFS_File *bf = (struct FINCHFS_File *)fd;
++	ssize_t r;
++
++	if (hints->dryRun)
++		return (len);
++
++	switch (access) {
++	case WRITE:
++		r = finchfs_pwrite(bf->fd, buffer, len, offset);
++		break;
++	default:
++		r = finchfs_pread(bf->fd, buffer, len, offset);
++		break;
++	}
++	return (r);
++}
++
++void
++FINCHFS_close(aiori_fd_t *fd, aiori_mod_opt_t *param)
++{
++	struct FINCHFS_File *bf = (struct FINCHFS_File *)fd;
++
++	if (hints->dryRun)
++		return;
++
++	finchfs_close(bf->fd);
++	free(bf);
++}
++
++void
++FINCHFS_delete(char *fn, aiori_mod_opt_t *param)
++{
++	if (hints->dryRun)
++		return;
++
++	finchfs_unlink(fn);
++}
++
++char *
++FINCHFS_version()
++{
++	return ((char *)finchfs_version());
++}
++
++void
++FINCHFS_fsync(aiori_fd_t *fd, aiori_mod_opt_t *param)
++{
++	struct FINCHFS_File *bf = (struct FINCHFS_File *)fd;
++
++	if (hints->dryRun)
++		return;
++
++	finchfs_fsync(bf->fd);
++}
++
++IOR_offset_t
++FINCHFS_get_file_size(aiori_mod_opt_t *param, char *fn)
++{
++	struct stat st;
++	int r;
++
++	if (hints->dryRun)
++		return (0);
++
++	r = finchfs_stat(fn, &st);
++	if (r < 0)
++		return (r);
++
++	return (st.st_size);
++}
++
++int
++FINCHFS_statfs(const char *fn, ior_aiori_statfs_t *st, aiori_mod_opt_t *param)
++{
++	if (hints->dryRun)
++		return (0);
++
++	return (0);
++}
++
++int
++FINCHFS_mkdir(const char *fn, mode_t mode, aiori_mod_opt_t *param)
++{
++	if (hints->dryRun)
++		return (0);
++
++	return (finchfs_mkdir(fn, mode));
++}
++
++int
++FINCHFS_rename(const char *oldfile, const char *newfile, aiori_mod_opt_t * param)
++{
++	if (hints->dryRun)
++		return (0);
++	return (finchfs_rename(oldfile, newfile));
++}
++
++int
++FINCHFS_rmdir(const char *fn, aiori_mod_opt_t *param)
++{
++	if (hints->dryRun)
++		return (0);
++
++	return (finchfs_rmdir(fn));
++}
++
++int
++FINCHFS_access(const char *fn, int mode, aiori_mod_opt_t *param)
++{
++	struct stat sb;
++
++	if (hints->dryRun)
++		return (0);
++
++	return (finchfs_stat(fn, &sb));
++}
++
++int
++FINCHFS_stat(const char *fn, struct stat *buf, aiori_mod_opt_t *param)
++{
++	if (hints->dryRun)
++		return (0);
++
++	return (finchfs_stat(fn, buf));
++}
++
++void
++FINCHFS_sync(aiori_mod_opt_t *param)
++{
++	if (hints->dryRun)
++		return;
++
++	return;
++}
++
++ior_aiori_t finchfs_aiori = {
++	.name = "FINCHFS",
++	.name_legacy = NULL,
++	.create = FINCHFS_create,
++	.open = FINCHFS_open,
++	.xfer_hints = FINCHFS_xfer_hints,
++	.xfer = FINCHFS_xfer,
++	.close = FINCHFS_close,
++	.delete = FINCHFS_delete,
++	.get_version = FINCHFS_version,
++	.fsync = FINCHFS_fsync,
++	.get_file_size = FINCHFS_get_file_size,
++	.statfs = FINCHFS_statfs,
++	.mkdir = FINCHFS_mkdir,
++	.rename = FINCHFS_rename,
++	.rmdir = FINCHFS_rmdir,
++	.access = FINCHFS_access,
++	.stat = FINCHFS_stat,
++	.initialize = FINCHFS_initialize,
++	.finalize = FINCHFS_finalize,
++	.get_options = FINCHFS_options,
++	.sync = FINCHFS_sync,
++	.enable_mdtest = true,
++};
+diff --git a/src/aiori-HDF5.c b/src/aiori-HDF5.c
+index e699209..416d58b 100755
+--- a/src/aiori-HDF5.c
++++ b/src/aiori-HDF5.c
+@@ -80,19 +80,24 @@
+     }                                                                    \
+ } while(0)
+ #endif                          /* H5_VERS_MAJOR > 1 && H5_VERS_MINOR > 6 */
++
+ /**************************** P R O T O T Y P E S *****************************/
+ 
+ static IOR_offset_t SeekOffset(void *, IOR_offset_t, aiori_mod_opt_t *);
+ static aiori_fd_t *HDF5_Create(char *, int flags, aiori_mod_opt_t *);
+ static aiori_fd_t *HDF5_Open(char *, int flags, aiori_mod_opt_t *);
+ static IOR_offset_t HDF5_Xfer(int, aiori_fd_t *, IOR_size_t *,
+-                           IOR_offset_t, IOR_offset_t, aiori_mod_opt_t *);
++                              IOR_offset_t, IOR_offset_t, aiori_mod_opt_t *);
+ static void HDF5_Close(aiori_fd_t *, aiori_mod_opt_t *);
+ static void HDF5_Delete(char *, aiori_mod_opt_t *);
+ static char* HDF5_GetVersion();
+ static void HDF5_Fsync(aiori_fd_t *, aiori_mod_opt_t *);
+ static IOR_offset_t HDF5_GetFileSize(aiori_mod_opt_t *, char *);
++static int HDF5_StatFS(const char *, ior_aiori_statfs_t *, aiori_mod_opt_t *);
++static int HDF5_MkDir(const char *, mode_t, aiori_mod_opt_t *);
++static int HDF5_RmDir(const char *, aiori_mod_opt_t *);
+ static int HDF5_Access(const char *, int, aiori_mod_opt_t *);
++static int HDF5_Stat(const char *, struct stat *, aiori_mod_opt_t *);
+ static void HDF5_Finalize(aiori_mod_opt_t *);
+ static void HDF5_init_xfer_options(aiori_xfer_hint_t * params);
+ static int HDF5_check_params(aiori_mod_opt_t * options);
+@@ -105,6 +110,7 @@ typedef struct{
+   int individualDataSets;          /* datasets not shared by all procs */
+   int noFill;                      /* no fill in file creation */
+   IOR_offset_t setAlignment;       /* alignment in bytes */
++  int chunk_size;
+ } HDF5_options_t;
+ /***************************** F U N C T I O N S ******************************/
+ 
+@@ -118,6 +124,8 @@ static option_help * HDF5_options(aiori_mod_opt_t ** init_backend_options, aiori
+     /* initialize the options properly */
+     o->collective_md = 0;
+     o->setAlignment = 1;
++    o->chunk_size = 0;
++    o->mpio.hintsFileName = NULL;
+   }
+ 
+   *init_backend_options = (aiori_mod_opt_t*) o;
+@@ -131,6 +139,7 @@ static option_help * HDF5_options(aiori_mod_opt_t ** init_backend_options, aiori
+     {0, "hdf5.individualDataSets",        "Datasets not shared by all procs [not working]", OPTION_FLAG, 'd', & o->individualDataSets},
+     {0, "hdf5.setAlignment",        "HDF5 alignment in bytes (e.g.: 8, 4k, 2m, 1g)", OPTION_OPTIONAL_ARGUMENT, 'd', & o->setAlignment},
+     {0, "hdf5.noFill", "No fill in HDF5 file creation", OPTION_FLAG, 'd', & o->noFill},
++    {0, "hdf5.chunkSize", "Chunk size (in terms of dataset elements) to use for I/O", OPTION_FLAG, 'd', & o->chunk_size},
+     LAST_OPTION
+   };
+   option_help * help = malloc(sizeof(h));
+@@ -153,11 +162,11 @@ ior_aiori_t hdf5_aiori = {
+         .xfer_hints = HDF5_init_xfer_options,
+         .fsync = HDF5_Fsync,
+         .get_file_size = HDF5_GetFileSize,
+-        .statfs = aiori_posix_statfs,
+-        .mkdir = aiori_posix_mkdir,
+-        .rmdir = aiori_posix_rmdir,
++        .statfs = HDF5_StatFS,
++        .mkdir = HDF5_MkDir,
++        .rmdir = HDF5_RmDir,
+         .access = HDF5_Access,
+-        .stat = aiori_posix_stat,
++        .stat = HDF5_Stat,
+         .finalize = HDF5_Finalize,
+         .get_options = HDF5_options,
+         .check_params = HDF5_check_params
+@@ -282,6 +291,7 @@ static aiori_fd_t *HDF5_Open(char *testFileName, int flags, aiori_mod_opt_t * pa
+                 ShowHints(&mpiHints);
+                 fprintf(stdout, "}\n");
+         }
++
+         HDF5_CHECK(H5Pset_fapl_mpio(accessPropList, comm, mpiHints),
+                    "cannot set file access property list");
+ 
+@@ -503,10 +513,33 @@ static void HDF5_Close(aiori_fd_t *afd, aiori_mod_opt_t * param)
+  */
+ static void HDF5_Delete(char *testFileName, aiori_mod_opt_t * param)
+ {
+-  if(hints->dryRun)
+-    return;
+-  MPIIO_Delete(testFileName, param);
+-  return;
++#ifdef HAVE_H5FDELETE
++        hid_t accessPropList;
++        MPI_Comm comm = MPI_COMM_SELF; /* Ony one rank accesses the file */
++        MPI_Info mpiHints = MPI_INFO_NULL;
++#endif
++
++        if(hints->dryRun)
++                return;
++
++#ifdef HAVE_H5FDELETE
++        /* set up file access property list */
++        accessPropList = H5Pcreate(H5P_FILE_ACCESS);
++        HDF5_CHECK(accessPropList, "cannot create file access property list");
++
++        HDF5_CHECK(H5Pset_fapl_mpio(accessPropList, comm, mpiHints),
++                   "cannot set file access property list");
++
++        HDF5_CHECK(H5Fdelete(testFileName, accessPropList),
++                   "cannot delete file");
++
++        HDF5_CHECK(H5Pclose(accessPropList),
++                   "cannot close access property list");
++#else
++        MPIIO_Delete(testFileName, NULL);
++#endif
++
++        return;
+ }
+ 
+ /*
+@@ -514,8 +547,8 @@ static void HDF5_Delete(char *testFileName, aiori_mod_opt_t * param)
+  */
+ static char * HDF5_GetVersion()
+ {
+-  static char version[1024] = {0};
+-  if(version[0]) return version;
++        static char version[1024] = {0};
++        if(version[0]) return version;
+ 
+         unsigned major, minor, release;
+         if (H5get_libversion(&major, &minor, &release) < 0) {
+@@ -560,8 +593,8 @@ static IOR_offset_t SeekOffset(void *afd, IOR_offset_t offset,
+     hsCount[0] = (hsize_t) 1;
+     hsStride[0] = (hsize_t) (hints->transferSize / sizeof(IOR_size_t));
+     hsBlock[0] = (hsize_t) (hints->transferSize / sizeof(IOR_size_t));
+-    
+-    fd->fileDataSpace = H5Dget_space(fd->dataSet);
++
++    /* select hyperslab in file data space */
+     HDF5_CHECK(H5Sselect_hyperslab(fd->fileDataSpace, H5S_SELECT_SET, hsStart, hsStride, hsCount, hsBlock),
+                "cannot select hyperslab");
+     return (offset);
+@@ -580,7 +613,6 @@ static void SetupDataSet(aiori_h5fd_t *fd, int flags, aiori_mod_opt_t * param)
+         static int dataSetSuffix = 0;
+ 
+         /* may want to use an extendable dataset (H5S_UNLIMITED) someday */
+-        /* may want to use a chunked dataset (H5S_CHUNKED) someday */
+ 
+         /* need to reset suffix counter if newly-opened file */
+         if (fd->newlyOpenedFile)
+@@ -597,8 +629,22 @@ static void SetupDataSet(aiori_h5fd_t *fd, int flags, aiori_mod_opt_t * param)
+                 dataSetSuffix++);
+ 
+         if (flags & IOR_CREAT) {     /* WRITE */
++                hsize_t chunk_dims[NUM_DIMS];
++
+                 /* create data set */
+                 dataSetPropList = H5Pcreate(H5P_DATASET_CREATE);
++
++                /* Set chunk size */
++                if (o->chunk_size > 0) {
++                    int i;
++
++                    for (i = 0; i < NUM_DIMS; i++)
++                            chunk_dims[i] = o->chunk_size;
++
++                    HDF5_CHECK(H5Pset_chunk(dataSetPropList, NUM_DIMS, chunk_dims),
++                        "cannot set chunk size");
++                }
++
+                 if (o->noFill == TRUE) {
+                         if (rank == 0 && verbose >= VERBOSE_1) {
+                                 fprintf(stdout, "\nusing 'no fill' option\n");
+@@ -611,29 +657,198 @@ static void SetupDataSet(aiori_h5fd_t *fd, int flags, aiori_mod_opt_t * param)
+                 HDF5_CHECK(fd->dataSet, "cannot create data set");
+         } else {                /* READ or CHECK */
+                 fd->dataSet = H5Dopen(*(hid_t *) fd, dataSetName);
+-                HDF5_CHECK(fd->dataSet, "cannot create data set");
++                HDF5_CHECK(fd->dataSet, "cannot open data set");
+         }
++
++        /* retrieve data space from data set for hyperslab */
++        fd->fileDataSpace = H5Dget_space(fd->dataSet);
++        HDF5_CHECK(fd->fileDataSpace, "cannot get data space from data set");
+ }
+ 
+-/*
+- * Use MPIIO call to get file size.
+- */
+-static IOR_offset_t
+-HDF5_GetFileSize(aiori_mod_opt_t * test, char *testFileName)
++static IOR_offset_t HDF5_GetFileSize(aiori_mod_opt_t * test, char *testFileName)
+ {
+-  if(hints->dryRun)
+-    return 0;
+-  return(MPIIO_GetFileSize(test, testFileName));
++        /* Ensure that non-native VOLs do not use MPIIO_GetFileSize() */
++#ifdef HAVE_H5PGET_VOL_ID
++        hid_t vol_id, accessPropList;
++#endif
++        IOR_offset_t ret;
++
++        if(hints->dryRun)
++                return 0;
++
++#ifdef HAVE_H5PGET_VOL_ID
++        /* set up file access property list */
++        accessPropList = H5Pcreate(H5P_FILE_ACCESS);
++        HDF5_CHECK(accessPropList, "cannot create file access property list");
++        HDF5_CHECK(H5Pget_vol_id(accessPropList, &vol_id), "cannot get vol id");
++        HDF5_CHECK(H5Pclose(accessPropList), "cannot close access property list");
++
++        if(vol_id == H5VL_NATIVE)
++#endif
++                ret = MPIIO_GetFileSize(test, testFileName);
++#ifdef HAVE_H5PGET_VOL_ID
++        else {
++                if(rank == 0)
++                    WARN("getfilesize not supported with current VOL connector!");
++
++                ret = -1;
++        }
++
++        HDF5_CHECK(H5VLclose(vol_id), "cannot close VOL ID");
++#endif
++
++        return ret;
+ }
+ 
+-/*
+- * Use MPIIO call to check for access.
+- */
+-static int HDF5_Access(const char *path, int mode, aiori_mod_opt_t *param)
++static int HDF5_StatFS(const char * oid, ior_aiori_statfs_t * stat_buf,
++                       aiori_mod_opt_t * param)
++{
++        int ret;
++#ifdef HAVE_H5PGET_VOL_ID
++        hid_t vol_id, accessPropList;
++
++        /* set up file access property list */
++        accessPropList = H5Pcreate(H5P_FILE_ACCESS);
++        HDF5_CHECK(accessPropList, "cannot create file access property list");
++        HDF5_CHECK(H5Pget_vol_id(accessPropList, &vol_id), "cannot get vol id");
++        HDF5_CHECK(H5Pclose(accessPropList), "cannot close access property list");
++
++        if(vol_id == H5VL_NATIVE)
++#endif
++                ret = aiori_posix_statfs(oid, stat_buf, param);
++#ifdef HAVE_H5PGET_VOL_ID
++        else {
++                if(rank == 0)
++                    WARN("statfs not supported by current VOL connector!");
++
++                ret = -1;
++        }
++
++        HDF5_CHECK(H5VLclose(vol_id), "cannot close VOL ID");
++#endif
++
++        return ret;
++}
++
++static int HDF5_MkDir(const char * oid, mode_t mode, aiori_mod_opt_t * param)
++{
++        int ret;
++#ifdef HAVE_H5PGET_VOL_ID
++        hid_t vol_id, accessPropList;
++
++        /* set up file access property list */
++        accessPropList = H5Pcreate(H5P_FILE_ACCESS);
++        HDF5_CHECK(accessPropList, "cannot create file access property list");
++        HDF5_CHECK(H5Pget_vol_id(accessPropList, &vol_id), "cannot get vol id");
++        HDF5_CHECK(H5Pclose(accessPropList), "cannot close access property list");
++
++        if(vol_id == H5VL_NATIVE)
++#endif
++                ret = aiori_posix_mkdir(oid, mode, param);
++#ifdef HAVE_H5PGET_VOL_ID
++        else {
++                if(rank == 0)
++                    WARN("mkdir not supported by current VOL connector!");
++
++                ret = -1;
++        }
++
++        HDF5_CHECK(H5VLclose(vol_id), "cannot close VOL ID");
++#endif
++
++        return ret;
++}
++
++static int HDF5_RmDir(const char * oid, aiori_mod_opt_t * param)
+ {
+-  if(hints->dryRun)
+-    return 0;
+-  return(MPIIO_Access(path, mode, param));
++        int ret;
++#ifdef HAVE_H5PGET_VOL_ID
++        hid_t vol_id, accessPropList;
++
++        /* set up file access property list */
++        accessPropList = H5Pcreate(H5P_FILE_ACCESS);
++        HDF5_CHECK(accessPropList, "cannot create file access property list");
++        HDF5_CHECK(H5Pget_vol_id(accessPropList, &vol_id), "cannot get vol id");
++        HDF5_CHECK(H5Pclose(accessPropList), "cannot close access property list");
++
++        if(vol_id == H5VL_NATIVE)
++#endif
++                ret = aiori_posix_rmdir(oid, param);
++#ifdef HAVE_H5PGET_VOL_ID
++        else {
++                if(rank == 0)
++                    WARN("rmdir not supported by current VOL connector!");
++
++                ret = -1;
++        }
++
++        HDF5_CHECK(H5VLclose(vol_id), "cannot close VOL ID");
++#endif
++
++        return ret;
++}
++
++static int HDF5_Access(const char * path, int mode, aiori_mod_opt_t * param)
++{
++        htri_t accessible = -1;
++        hid_t accessPropList;
++        MPI_Comm comm = MPI_COMM_SELF; /* Ony one rank accesses the file */
++        MPI_Info mpiHints = MPI_INFO_NULL;
++        int ret = -1;
++
++        if(hints->dryRun)
++                return 0;
++
++#ifdef HAVE_H5FIS_ACCESSIBLE
++        /* set up file access property list */
++        accessPropList = H5Pcreate(H5P_FILE_ACCESS);
++        HDF5_CHECK(accessPropList, "cannot create file access property list");
++
++        HDF5_CHECK(H5Pset_fapl_mpio(accessPropList, comm, mpiHints),
++                   "cannot set file access property list");
++
++        H5E_BEGIN_TRY {
++            accessible = H5Fis_accessible(path, accessPropList);
++        } H5E_END_TRY;
++        if (accessible > 0)
++            ret = 0;
++
++        HDF5_CHECK(H5Pclose(accessPropList),
++                   "cannot close access property list");
++#else
++        ret = MPIIO_Access(path, mode, param);
++#endif
++
++        return ret;
++}
++
++static int HDF5_Stat(const char * oid, struct stat * buf, aiori_mod_opt_t * param)
++{
++        int ret;
++#ifdef HAVE_H5PGET_VOL_ID
++        hid_t vol_id, accessPropList;
++
++        /* set up file access property list */
++        accessPropList = H5Pcreate(H5P_FILE_ACCESS);
++        HDF5_CHECK(accessPropList, "cannot create file access property list");
++        HDF5_CHECK(H5Pget_vol_id(accessPropList, &vol_id), "cannot get vol id");
++        HDF5_CHECK(H5Pclose(accessPropList), "cannot close access property list");
++
++        if(vol_id == H5VL_NATIVE)
++#endif
++                ret = aiori_posix_stat(oid, buf, param);
++#ifdef HAVE_H5PGET_VOL_ID
++        else {
++                if(rank == 0)
++                    WARN("stat not supported by current VOL connector!");
++
++                ret = -1;
++        }
++
++        HDF5_CHECK(H5VLclose(vol_id), "cannot close VOL ID");
++#endif
++
++        return ret;
+ }
+ 
+ /*
+diff --git a/src/aiori-MPIIO.c b/src/aiori-MPIIO.c
+index 059755e..52bc727 100755
+--- a/src/aiori-MPIIO.c
++++ b/src/aiori-MPIIO.c
+@@ -592,7 +592,8 @@ IOR_offset_t MPIIO_GetFileSize(aiori_mod_opt_t * module_options, char *testFileN
+                 comm = testComm;
+         }
+ 
+-        SetHints(&mpiHints, test->hintsFileName);
++        if(test)
++                SetHints(&mpiHints, test->hintsFileName);
+         MPI_CHECK(MPI_File_open(comm, testFileName, MPI_MODE_RDONLY,
+                                 mpiHints, &fd),
+                   "cannot open file to get file size");
+diff --git a/src/aiori-RADOS.c b/src/aiori-RADOS.c
+index b8789d4..ebfd41c 100755
+--- a/src/aiori-RADOS.c
++++ b/src/aiori-RADOS.c
+@@ -20,6 +20,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <sys/stat.h>
++#include <errno.h>
+ #include <rados/librados.h>
+ 
+ #include "ior.h"
+@@ -27,47 +28,70 @@
+ #include "aiori.h"
+ #include "utilities.h"
+ 
++#define RADOS_ERR(__err_str, __ret) do { \
++        errno = -__ret; \
++        ERR(__err_str); \
++} while(0)
++
++/**************************** P R O T O T Y P E S *****************************/
++
++static void RADOS_Initialize(aiori_mod_opt_t *);
++static void RADOS_Finalize(aiori_mod_opt_t *);
++static aiori_fd_t *RADOS_Create(char *, int flags, aiori_mod_opt_t *);
++static aiori_fd_t *RADOS_Open(char *, int flags, aiori_mod_opt_t *);
++static IOR_offset_t RADOS_Xfer(int, aiori_fd_t *, IOR_size_t *,
++                           IOR_offset_t, IOR_offset_t, aiori_mod_opt_t *);
++static void RADOS_Close(aiori_fd_t *, aiori_mod_opt_t *);
++static void RADOS_Delete(char *, aiori_mod_opt_t *);
++static void RADOS_Fsync(aiori_fd_t *, aiori_mod_opt_t *);
++static IOR_offset_t RADOS_GetFileSize(aiori_mod_opt_t *, char *);
++static int RADOS_StatFS(const char *, ior_aiori_statfs_t *, aiori_mod_opt_t *);
++static int RADOS_MkDir(const char *, mode_t, aiori_mod_opt_t *);
++static int RADOS_RmDir(const char *, aiori_mod_opt_t *);
++static int RADOS_Access(const char *, int, aiori_mod_opt_t *);
++static int RADOS_Stat(const char *, struct stat *, aiori_mod_opt_t *);
++static int RADOS_check_params(aiori_mod_opt_t * options);
++
+ /************************** O P T I O N S *****************************/
+-struct rados_options{
++typedef struct {
+   char * user;
+   char * conf;
+   char * pool;
+-};
+-
+-static struct rados_options o = {
+-  .user = NULL,
+-  .conf = NULL,
+-  .pool = NULL,
+-};
+-
+-static option_help options [] = {
+-      {0, "rados.user", "Username for the RADOS cluster", OPTION_REQUIRED_ARGUMENT, 's', & o.user},
+-      {0, "rados.conf", "Config file for the RADOS cluster", OPTION_REQUIRED_ARGUMENT, 's', & o.conf},
+-      {0, "rados.pool", "RADOS pool to use for I/O", OPTION_REQUIRED_ARGUMENT, 's', & o.pool},
+-      LAST_OPTION
+-};
+-
++} RADOS_options_t;
++/***************************** F U N C T I O N S ******************************/
+ 
+-/**************************** P R O T O T Y P E S *****************************/
+-static void *RADOS_Create(char *, IOR_param_t *);
+-static void *RADOS_Open(char *, IOR_param_t *);
+-static IOR_offset_t RADOS_Xfer(int, void *, IOR_size_t *,
+-                           IOR_offset_t, IOR_param_t *);
+-static void RADOS_Close(void *, IOR_param_t *);
+-static void RADOS_Delete(char *, IOR_param_t *);
+-static void RADOS_Fsync(void *, IOR_param_t *);
+-static IOR_offset_t RADOS_GetFileSize(IOR_param_t *, MPI_Comm, char *);
+-static int RADOS_StatFS(const char *, ior_aiori_statfs_t *, IOR_param_t *);
+-static int RADOS_MkDir(const char *, mode_t, IOR_param_t *);
+-static int RADOS_RmDir(const char *, IOR_param_t *);
+-static int RADOS_Access(const char *, int, IOR_param_t *);
+-static int RADOS_Stat(const char *, struct stat *, IOR_param_t *);
+-static option_help * RADOS_options();
++static option_help * RADOS_options(aiori_mod_opt_t ** init_backend_options, aiori_mod_opt_t * init_values){
++  RADOS_options_t * o = malloc(sizeof(RADOS_options_t));
++
++  if (init_values != NULL){
++    memcpy(o, init_values, sizeof(RADOS_options_t));
++  }else{
++    memset(o, 0, sizeof(RADOS_options_t));
++    /* initialize the options properly */
++    o->user = NULL;
++    o->conf = NULL;
++    o->pool = NULL;
++  }
++
++  *init_backend_options = (aiori_mod_opt_t*) o;
++
++  option_help h [] = {
++    {0, "rados.user", "Username for the RADOS cluster", OPTION_OPTIONAL_ARGUMENT, 's', & o->user},
++    {0, "rados.conf", "Config file for the RADOS cluster", OPTION_OPTIONAL_ARGUMENT, 's', & o->conf},
++    {0, "rados.pool", "RADOS pool to use for I/O", OPTION_OPTIONAL_ARGUMENT, 's', & o->pool},
++    LAST_OPTION
++  };
++  option_help * help = malloc(sizeof(h));
++  memcpy(help, h, sizeof(h));
++  return help;
++}
+ 
+ /************************** D E C L A R A T I O N S ***************************/
+ ior_aiori_t rados_aiori = {
+         .name = "RADOS",
+         .name_legacy = NULL,
++        .initialize = RADOS_Initialize,
++        .finalize = RADOS_Finalize,
+         .create = RADOS_Create,
+         .open = RADOS_Open,
+         .xfer = RADOS_Xfer,
+@@ -82,71 +106,77 @@ ior_aiori_t rados_aiori = {
+         .access = RADOS_Access,
+         .stat = RADOS_Stat,
+         .get_options = RADOS_options,
++        .check_params = RADOS_check_params
+ };
+ 
+-#define RADOS_ERR(__err_str, __ret) do { \
+-        errno = -__ret; \
+-        ERR(__err_str); \
+-} while(0)
++static rados_t       rados_cluster;     /* RADOS cluster handle */
++static rados_ioctx_t rados_ioctx;       /* I/O context for our pool in the RADOS cluster */
+ 
+ /***************************** F U N C T I O N S ******************************/
+-static option_help * RADOS_options(){
+-  return options;
++
++static int RADOS_check_params(aiori_mod_opt_t * options){
++  RADOS_options_t *o = (RADOS_options_t*) options;
++  if (!(o->user))
++      ERR("RADOS user must be specified");
++  if (!(o->conf))
++      ERR("RADOS conf must be specified");
++  if (!(o->pool))
++      ERR("RADOS pool must be specified");
++  return 0;
+ }
+ 
+-static void RADOS_Cluster_Init(IOR_param_t * param)
++static void RADOS_Initialize(aiori_mod_opt_t * options)
+ {
++        RADOS_options_t *o = (RADOS_options_t*) options;
+         int ret;
+ 
+         /* create RADOS cluster handle */
+-        ret = rados_create(&param->rados_cluster, o.user);
++        ret = rados_create(&rados_cluster, o->user);
+         if (ret)
+                 RADOS_ERR("unable to create RADOS cluster handle", ret);
+ 
+         /* set the handle using the Ceph config */
+-        ret = rados_conf_read_file(param->rados_cluster, o.conf);
++        ret = rados_conf_read_file(rados_cluster, o->conf);
+         if (ret)
+                 RADOS_ERR("unable to read RADOS config file", ret);
+ 
+         /* connect to the RADOS cluster */
+-        ret = rados_connect(param->rados_cluster);
++        ret = rados_connect(rados_cluster);
+         if (ret)
+                 RADOS_ERR("unable to connect to the RADOS cluster", ret);
+ 
+         /* create an io context for the pool we are operating on */
+-        ret = rados_ioctx_create(param->rados_cluster, o.pool, &param->rados_ioctx);
++        ret = rados_ioctx_create(rados_cluster, o->pool, &rados_ioctx);
+         if (ret)
+                 RADOS_ERR("unable to create an I/O context for the RADOS cluster", ret);
+ 
+         return;
+ }
+ 
+-static void RADOS_Cluster_Finalize(IOR_param_t * param)
++static void RADOS_Finalize(aiori_mod_opt_t * options)
+ {
+         /* ioctx destroy */
+-        rados_ioctx_destroy(param->rados_ioctx);
++        rados_ioctx_destroy(rados_ioctx);
+ 
+         /* shutdown */
+-        rados_shutdown(param->rados_cluster);
++        rados_shutdown(rados_cluster);
+ }
+ 
+-static void *RADOS_Create_Or_Open(char *testFileName, IOR_param_t * param, int create_flag)
++static aiori_fd_t *RADOS_Create_Or_Open(char *testFileName, int flags, aiori_mod_opt_t *param)
+ {
+         int ret;
+         char *oid;
+ 
+-        RADOS_Cluster_Init(param);
+-
+         oid = strdup(testFileName);
+         if (!oid)
+                 ERR("unable to allocate RADOS oid");
+ 
+-        if (create_flag)
++        if (flags & IOR_CREAT)
+         {
+                 rados_write_op_t create_op;
+                 int rados_create_flag;
+ 
+-                if (param->openFlags & IOR_EXCL)
++                if (flags & IOR_EXCL)
+                         rados_create_flag = LIBRADOS_CREATE_EXCLUSIVE;
+                 else
+                         rados_create_flag = LIBRADOS_CREATE_IDEMPOTENT;
+@@ -154,7 +184,7 @@ static void *RADOS_Create_Or_Open(char *testFileName, IOR_param_t * param, int c
+                 /* create a RADOS "write op" for creating the object */
+                 create_op = rados_create_write_op();
+                 rados_write_op_create(create_op, rados_create_flag, NULL);
+-                ret = rados_write_op_operate(create_op, param->rados_ioctx, oid,
++                ret = rados_write_op_operate(create_op, rados_ioctx, oid,
+                                        NULL, 0);
+                 rados_release_write_op(create_op);
+                 if (ret)
+@@ -165,24 +195,21 @@ static void *RADOS_Create_Or_Open(char *testFileName, IOR_param_t * param, int c
+                 /* XXX actually, we should probably assert oid existence here? */
+         }
+ 
+-        return (void *)oid;
++        return (aiori_fd_t *)oid;
+ }
+ 
+-static void *RADOS_Create(char *testFileName, IOR_param_t * param)
++static aiori_fd_t *RADOS_Create(char *testFileName, int flags, aiori_mod_opt_t *param)
+ {
+-        return RADOS_Create_Or_Open(testFileName, param, TRUE);
++        return RADOS_Create_Or_Open(testFileName, flags, param);
+ }
+ 
+-static void *RADOS_Open(char *testFileName, IOR_param_t * param)
++static aiori_fd_t *RADOS_Open(char *testFileName, int flags, aiori_mod_opt_t *param)
+ {
+-        if (param->openFlags & IOR_CREAT)
+-                return RADOS_Create_Or_Open(testFileName, param, TRUE);
+-        else
+-                return RADOS_Create_Or_Open(testFileName, param, FALSE);
++        return RADOS_Create_Or_Open(testFileName, flags, param);
+ }
+ 
+-static IOR_offset_t RADOS_Xfer(int access, void *fd, IOR_size_t * buffer,
+-                               IOR_offset_t length, IOR_param_t * param)
++static IOR_offset_t RADOS_Xfer(int access, aiori_fd_t *fd, IOR_size_t * buffer,
++                               IOR_offset_t length, IOR_offset_t offset, aiori_mod_opt_t * param)
+ {
+         int ret;
+         char *oid = (char *)fd;
+@@ -193,8 +220,8 @@ static IOR_offset_t RADOS_Xfer(int access, void *fd, IOR_size_t * buffer,
+ 
+                 write_op = rados_create_write_op();
+                 rados_write_op_write(write_op, (const char *)buffer,
+-                                     length, param->offset);
+-                ret = rados_write_op_operate(write_op, param->rados_ioctx,
++                                     length, offset);
++                ret = rados_write_op_operate(write_op, rados_ioctx,
+                                              oid, NULL, 0);
+                 rados_release_write_op(write_op);
+                 if (ret)
+@@ -207,9 +234,9 @@ static IOR_offset_t RADOS_Xfer(int access, void *fd, IOR_size_t * buffer,
+                 rados_read_op_t read_op;
+ 
+                 read_op = rados_create_read_op();
+-                rados_read_op_read(read_op, param->offset, length, (char *)buffer,
++                rados_read_op_read(read_op, offset, length, (char *)buffer,
+                                    &bytes_read, &read_ret);
+-                ret = rados_read_op_operate(read_op, param->rados_ioctx, oid, 0);
++                ret = rados_read_op_operate(read_op, rados_ioctx, oid, 0);
+                 rados_release_read_op(read_op);
+                 if (ret || read_ret || ((IOR_offset_t)bytes_read != length))
+                         RADOS_ERR("unable to read RADOS object", ret);
+@@ -218,47 +245,40 @@ static IOR_offset_t RADOS_Xfer(int access, void *fd, IOR_size_t * buffer,
+         return length;
+ }
+ 
+-static void RADOS_Fsync(void *fd, IOR_param_t * param)
++static void RADOS_Fsync(aiori_fd_t *fd, aiori_mod_opt_t * param)
+ {
+         return;
+ }
+ 
+-static void RADOS_Close(void *fd, IOR_param_t * param)
++static void RADOS_Close(aiori_fd_t *fd, aiori_mod_opt_t * param)
+ {
+         char *oid = (char *)fd;
+ 
+-        /* object does not need to be "closed", but we should tear the cluster down */
+-        RADOS_Cluster_Finalize(param);
++        /* object does not need to be "closed" */
+         free(oid);
+ 
+         return;
+ }
+ 
+-static void RADOS_Delete(char *testFileName, IOR_param_t * param)
++static void RADOS_Delete(char *testFileName, aiori_mod_opt_t * param)
+ {
+         int ret;
+         char *oid = testFileName;
+         rados_write_op_t remove_op;
+ 
+-        /* we have to reestablish cluster connection here... */
+-        RADOS_Cluster_Init(param);
+-
+         /* remove the object */
+         remove_op = rados_create_write_op();
+         rados_write_op_remove(remove_op);
+-        ret = rados_write_op_operate(remove_op, param->rados_ioctx,
++        ret = rados_write_op_operate(remove_op, rados_ioctx,
+                                      oid, NULL, 0);
+         rados_release_write_op(remove_op);
+         if (ret)
+                 RADOS_ERR("unable to remove RADOS object", ret);
+ 
+-        RADOS_Cluster_Finalize(param);
+-
+         return;
+ }
+ 
+-static IOR_offset_t RADOS_GetFileSize(IOR_param_t * test, MPI_Comm testComm,
+-                                      char *testFileName)
++static IOR_offset_t RADOS_GetFileSize(aiori_mod_opt_t *param, char *testFileName)
+ {
+         int ret;
+         char *oid = testFileName;
+@@ -267,92 +287,57 @@ static IOR_offset_t RADOS_GetFileSize(IOR_param_t * test, MPI_Comm testComm,
+         int stat_ret;
+         IOR_offset_t aggSizeFromStat, tmpMin, tmpMax, tmpSum;
+ 
+-        /* we have to reestablish cluster connection here... */
+-        RADOS_Cluster_Init(test);
+-
+         /* stat the object */
+         stat_op = rados_create_read_op();
+         rados_read_op_stat(stat_op, &oid_size, NULL, &stat_ret);
+-        ret = rados_read_op_operate(stat_op, test->rados_ioctx, oid, 0);
++        ret = rados_read_op_operate(stat_op, rados_ioctx, oid, 0);
+         rados_release_read_op(stat_op);
+         if (ret || stat_ret)
+                 RADOS_ERR("unable to stat RADOS object", stat_ret);
+         aggSizeFromStat = oid_size;
+ 
+-        if (test->filePerProc == TRUE)
+-        {
+-                MPI_CHECK(MPI_Allreduce(&aggSizeFromStat, &tmpSum, 1,
+-                                        MPI_LONG_LONG_INT, MPI_SUM, testComm),
+-                          "cannot total data moved");
+-                aggSizeFromStat = tmpSum;
+-        }
+-        else
+-        {
+-                MPI_CHECK(MPI_Allreduce(&aggSizeFromStat, &tmpMin, 1,
+-                                        MPI_LONG_LONG_INT, MPI_MIN, testComm),
+-                          "cannot total data moved");
+-                MPI_CHECK(MPI_Allreduce(&aggSizeFromStat, &tmpMax, 1,
+-                                        MPI_LONG_LONG_INT, MPI_MAX, testComm),
+-                          "cannot total data moved");
+-                if (tmpMin != tmpMax)
+-                {
+-                        if (rank == 0)
+-                                WARN("inconsistent file size by different tasks");
+-
+-                        /* incorrect, but now consistent across tasks */
+-                        aggSizeFromStat = tmpMin;
+-                }
+-        }
+-
+-        RADOS_Cluster_Finalize(test);
+-
+         return aggSizeFromStat;
+ }
+ 
+ static int RADOS_StatFS(const char *oid, ior_aiori_statfs_t *stat_buf,
+-                        IOR_param_t *param)
++                        aiori_mod_opt_t * param)
+ {
+         WARN("statfs not supported in RADOS backend!");
+         return -1;
+ }
+ 
+-static int RADOS_MkDir(const char *oid, mode_t mode, IOR_param_t *param)
++static int RADOS_MkDir(const char *oid, mode_t mode, aiori_mod_opt_t * param)
+ {
+         WARN("mkdir not supported in RADOS backend!");
+         return -1;
+ }
+ 
+-static int RADOS_RmDir(const char *oid, IOR_param_t *param)
++static int RADOS_RmDir(const char *oid, aiori_mod_opt_t * param)
+ {
+         WARN("rmdir not supported in RADOS backend!");
+         return -1;
+ }
+ 
+-static int RADOS_Access(const char *oid, int mode, IOR_param_t *param)
++static int RADOS_Access(const char *oid, int mode, aiori_mod_opt_t * param)
+ {
+         rados_read_op_t read_op;
+         int ret;
+         int prval;
+         uint64_t oid_size;
+ 
+-        /* we have to reestablish cluster connection here... */
+-        RADOS_Cluster_Init(param);
+-
+         /* use read_op stat to check for oid existence */
+         read_op = rados_create_read_op();
+         rados_read_op_stat(read_op, &oid_size, NULL, &prval);
+-        ret = rados_read_op_operate(read_op, param->rados_ioctx, oid, 0);
++        ret = rados_read_op_operate(read_op, rados_ioctx, oid, 0);
+         rados_release_read_op(read_op);
+ 
+-        RADOS_Cluster_Finalize(param);
+-
+         if (ret | prval)
+                 return -1;
+         else
+                 return 0;
+ }
+ 
+-static int RADOS_Stat(const char *oid, struct stat *buf, IOR_param_t *param)
++static int RADOS_Stat(const char *oid, struct stat *buf, aiori_mod_opt_t * param)
+ {
+         WARN("stat not supported in RADOS backend!");
+         return -1;
+diff --git a/src/aiori.c b/src/aiori.c
+index 651340f..42dbbb0 100644
+--- a/src/aiori.c
++++ b/src/aiori.c
+@@ -89,6 +89,9 @@ ior_aiori_t *available_aiori[] = {
+ #endif
+ #ifdef USE_CHFS_AIORI
+ 	&chfs_aiori,
++#endif
++#ifdef USE_FINCHFS_AIORI
++	&finchfs_aiori,
+ #endif
+         NULL
+ };
+diff --git a/src/aiori.h b/src/aiori.h
+index 81442df..99a03f7 100755
+--- a/src/aiori.h
++++ b/src/aiori.h
+@@ -140,6 +140,7 @@ extern ior_aiori_t rados_aiori;
+ extern ior_aiori_t cephfs_aiori;
+ extern ior_aiori_t gfarm_aiori;
+ extern ior_aiori_t chfs_aiori;
++extern ior_aiori_t finchfs_aiori;
+ 
+ const ior_aiori_t *aiori_select (const char *api);
+ int aiori_count (void);
+diff --git a/src/ior-output.c b/src/ior-output.c
+index 3f75e46..78f4768 100644
+--- a/src/ior-output.c
++++ b/src/ior-output.c
+@@ -70,7 +70,7 @@ static void PrintKeyValEnd(){
+   needNextToken = 1;
+ }
+ 
+-static void PrintKeyVal(char * key, char * value){
++void PrintKeyVal(char * key, char * value){
+   if(value != NULL && value[0] != 0 && value[strlen(value) -1 ] == '\n'){
+     // remove \n
+     value[strlen(value) -1 ] = 0;
+@@ -450,6 +450,11 @@ void ShowSetup(IOR_param_t *params)
+   if (params->memoryPerNode != 0){
+     PrintKeyVal("memoryPerNode", HumanReadable(params->memoryPerNode, BASE_TWO));
+   }
++  
++  PrintKeyVal("memoryBuffer", params->gpuMemoryFlags == IOR_MEMORY_TYPE_CPU ? "CPU" :  params->gpuMemoryFlags == IOR_MEMORY_TYPE_GPU_DEVICE_ONLY ? "GPU" : "Managed");
++  PrintKeyVal("dataAccess", params->gpuMemoryFlags > IOR_MEMORY_TYPE_GPU_MANAGED_CHECK_GPU ? "GPU" : "CPU");
++  PrintKeyVal("GPUDirect", params->gpuDirect ? "1" : "0");
++
+   PrintKeyValInt("repetitions", params->repetitions);
+   PrintKeyVal("xfersize", HumanReadable(params->transferSize, BASE_TWO));
+   PrintKeyVal("blocksize", HumanReadable(params->blockSize, BASE_TWO));
+@@ -640,7 +645,7 @@ void PrintLongSummaryOneTest(IOR_test_t *test)
+ 
+         if (params->writeFile)
+                 PrintLongSummaryOneOperation(test, WRITE);
+-        if (params->readFile)
++        if (params->readFile || params->checkRead)
+                 PrintLongSummaryOneOperation(test, READ);
+ }
+ 
+@@ -681,7 +686,7 @@ void PrintLongSummaryAllTests(IOR_test_t *tests_head)
+   PrintLongSummaryHeader();
+ 
+   for (tptr = tests_head; tptr != NULL; tptr = tptr->next) {
+-          PrintLongSummaryOneTest(tptr);
++    PrintLongSummaryOneTest(tptr);
+   }
+ 
+   PrintArrayEnd();
+diff --git a/src/ior.c b/src/ior.c
+index f97e19f..6fe10a1 100755
+--- a/src/ior.c
++++ b/src/ior.c
+@@ -66,7 +66,7 @@ static char **ParseFileName(char *, int *);
+ static void InitTests(IOR_test_t *);
+ static void TestIoSys(IOR_test_t *);
+ static void ValidateTests(IOR_param_t * params, MPI_Comm com);
+-static IOR_offset_t WriteOrRead(IOR_param_t *test, IOR_results_t *results,
++static IOR_offset_t WriteOrRead(IOR_param_t *test, int rep, IOR_results_t *results,
+                                 aiori_fd_t *fd, const int access,
+                                 IOR_io_buffers *ioBuffers);
+ 
+@@ -125,12 +125,10 @@ static int test_initialize(IOR_test_t * test){
+   verbose = test->params.verbose;
+   backend = test->params.backend;
+ 
+-#ifdef HAVE_CUDA
+-  cudaError_t cret = cudaSetDevice(test->params.gpuID);
+-  if(cret != cudaSuccess){
+-    WARNF("cudaSetDevice(%d) error: %s", test->params.gpuID, cudaGetErrorString(cret));
++  if(test->params.gpuMemoryFlags != IOR_MEMORY_TYPE_CPU){
++    initCUDA(test->params.tasksBlockMapping, rank, test->params.numNodes, test->params.numTasksOnNode0, test->params.gpuID);
+   }
+-#endif
++  
+ 
+   if(backend->initialize){
+     backend->initialize(test->params.backend_options);
+@@ -275,6 +273,7 @@ void init_IOR_Param_t(IOR_param_t * p, MPI_Comm com)
+         p->numTasks = -1;
+         p->numNodes = -1;
+         p->numTasksOnNode0 = -1;
++        p->gpuID = -1;
+ 
+         p->repetitions = 1;
+         p->repCounter = -1;
+@@ -1200,7 +1199,8 @@ static void TestIoSys(IOR_test_t *test)
+           GetTestFileName(testFileName, params);
+           int ret = backend->stat(testFileName, & sb, params->backend_options);
+           if(ret == 0) {
+-            WARNF("The file \"%s\" exists already and will be overwritten", testFileName);
++            WARNF("The file \"%s\" exists already and will be %s", testFileName,
++		  params->useExistingTestFile ? "overwritten" : "deleted");
+           }
+         }
+ 
+@@ -1267,7 +1267,7 @@ static void TestIoSys(IOR_test_t *test)
+                                         CurrentTimeString());
+                         }
+                         timer[IOR_TIMER_RDWR_START] = GetTimeStamp();
+-                        dataMoved = WriteOrRead(params, &results[rep], fd, WRITE, &ioBuffers);
++                        dataMoved = WriteOrRead(params, rep, &results[rep], fd, WRITE, &ioBuffers);
+                         if (params->verbose >= VERBOSE_4) {
+                           fprintf(out_logfile, "* data moved = %llu\n", dataMoved);
+                           fflush(out_logfile);
+@@ -1318,7 +1318,7 @@ static void TestIoSys(IOR_test_t *test)
+                         params->open = WRITECHECK;
+                         fd = backend->open(testFileName, IOR_RDONLY, params->backend_options);
+                         if(fd == NULL) FAIL("Cannot open file");
+-                        dataMoved = WriteOrRead(params, &results[rep], fd, WRITECHECK, &ioBuffers);
++                        dataMoved = WriteOrRead(params, rep, &results[rep], fd, WRITECHECK, &ioBuffers);
+                         backend->close(fd, params->backend_options);
+                         rankOffset = 0;
+                 }
+@@ -1397,7 +1397,7 @@ static void TestIoSys(IOR_test_t *test)
+                                         CurrentTimeString());
+                         }
+                         timer[IOR_TIMER_RDWR_START] = GetTimeStamp();
+-                        dataMoved = WriteOrRead(params, &results[rep], fd, operation_flag, &ioBuffers);
++                        dataMoved = WriteOrRead(params, rep, &results[rep], fd, operation_flag, &ioBuffers);
+                         timer[IOR_TIMER_RDWR_STOP] = GetTimeStamp();
+                         if (params->intraTestBarriers)
+                                 MPI_CHECK(MPI_Barrier(testComm),
+@@ -1452,6 +1452,10 @@ static void ValidateTests(IOR_param_t * test, MPI_Comm com)
+         IOR_param_t defaults;
+         init_IOR_Param_t(&defaults, com);
+ 
++        if (test->gpuDirect && test->gpuMemoryFlags == IOR_MEMORY_TYPE_CPU )
++          ERR("GPUDirect requires a non-CPU memory type");
++        if (test->gpuMemoryFlags == IOR_MEMORY_TYPE_GPU_DEVICE_ONLY && ! test->gpuDirect )
++          ERR("Using GPU Device memory only requires the usage of GPUDirect");
+         if (test->stoneWallingStatusFile && test->keepFile == 0)
+           ERR("a StoneWallingStatusFile is only sensible when splitting write/read into multiple executions of ior, please use -k");
+         if (test->stoneWallingStatusFile && test->stoneWallingWearOut == 0 && test->writeFile)
+@@ -1643,7 +1647,7 @@ IOR_offset_t *GetOffsetArrayRandom(IOR_param_t * test, int pretendRank, IOR_offs
+         return (offsetArray);
+ }
+ 
+-static IOR_offset_t WriteOrReadSingle(IOR_offset_t offset, int pretendRank, IOR_offset_t transfer, int * errors, IOR_param_t * test, aiori_fd_t * fd, IOR_io_buffers* ioBuffers, int access){
++static IOR_offset_t WriteOrReadSingle(IOR_offset_t offset, int pretendRank, IOR_offset_t transfer, int * errors, IOR_param_t * test, aiori_fd_t * fd, IOR_io_buffers* ioBuffers, int access, OpTimer* ot, double startTime){
+   IOR_offset_t amtXferred = 0;
+ 
+   void *buffer = ioBuffers->buffer;
+@@ -1651,7 +1655,9 @@ static IOR_offset_t WriteOrReadSingle(IOR_offset_t offset, int pretendRank, IOR_
+           /* fills each transfer with a unique pattern
+            * containing the offset into the file */
+           update_write_memory_pattern(offset, ioBuffers->buffer, transfer, test->setTimeStampSignature, pretendRank, test->dataPacketType, test->gpuMemoryFlags);
++          double start = GetTimeStamp();
+           amtXferred = backend->xfer(access, fd, buffer, transfer, offset, test->backend_options);
++          if(ot) OpTimerValue(ot, start - startTime, GetTimeStamp() - start);
+           if (amtXferred != transfer)
+                   ERR("cannot write to file");
+           if (test->fsyncPerWrite)
+@@ -1661,7 +1667,9 @@ static IOR_offset_t WriteOrReadSingle(IOR_offset_t offset, int pretendRank, IOR_
+             nanosleep( & wait, NULL);
+           }
+   } else if (access == READ) {
++          double start = GetTimeStamp();
+           amtXferred = backend->xfer(access, fd, buffer, transfer, offset, test->backend_options);
++          if(ot) OpTimerValue(ot, start - startTime, GetTimeStamp() - start);
+           if (amtXferred != transfer)
+                   ERR("cannot read from file");
+           if (test->interIODelay > 0){
+@@ -1670,13 +1678,17 @@ static IOR_offset_t WriteOrReadSingle(IOR_offset_t offset, int pretendRank, IOR_
+           }
+   } else if (access == WRITECHECK) {
+           invalidate_buffer_pattern(buffer, transfer, test->gpuMemoryFlags);
++          double start = GetTimeStamp();
+           amtXferred = backend->xfer(access, fd, buffer, transfer, offset, test->backend_options);
++          if(ot) OpTimerValue(ot, start - startTime, GetTimeStamp() - start);
+           if (amtXferred != transfer)
+                   ERR("cannot read from file write check");
+           *errors += CompareData(buffer, transfer, test, offset, pretendRank, WRITECHECK);
+   } else if (access == READCHECK) {
+           invalidate_buffer_pattern(buffer, transfer, test->gpuMemoryFlags);          
++          double start = GetTimeStamp();
+           amtXferred = backend->xfer(access, fd, buffer, transfer, offset, test->backend_options);
++          if(ot) OpTimerValue(ot, start - startTime, GetTimeStamp() - start);
+           if (amtXferred != transfer){
+             ERR("cannot read from file");
+           }
+@@ -1699,7 +1711,7 @@ static void prefillSegment(IOR_param_t *test, void * randomPrefillBuffer, int pr
+       } else {
+         offset += (i * test->numTasks * test->blockSize) + (pretendRank * test->blockSize);
+       }
+-      WriteOrReadSingle(offset, pretendRank, test->randomPrefillBlocksize, & errors, test, fd, ioBuffers, WRITE);
++      WriteOrReadSingle(offset, pretendRank, test->randomPrefillBlocksize, & errors, test, fd, ioBuffers, WRITE, NULL, 0);
+     }
+   }
+   ioBuffers->buffer = oldBuffer;
+@@ -1709,7 +1721,7 @@ static void prefillSegment(IOR_param_t *test, void * randomPrefillBuffer, int pr
+  * Write or Read data to file(s).  This loops through the strides, writing
+  * out the data to each block in transfer sizes, until the remainder left is 0.
+  */
+-static IOR_offset_t WriteOrRead(IOR_param_t *test, IOR_results_t *results,
++static IOR_offset_t WriteOrRead(IOR_param_t *test, int rep, IOR_results_t *results,
+                                 aiori_fd_t *fd, const int access, IOR_io_buffers *ioBuffers)
+ {
+         int errors = 0;
+@@ -1742,7 +1754,14 @@ static IOR_offset_t WriteOrRead(IOR_param_t *test, IOR_results_t *results,
+           memset(randomPrefillBuffer, -1, test->randomPrefillBlocksize);
+         }
+ 
+-        // start timer after random offset was generated
++        /* Per operation statistics */
++        OpTimer * ot = NULL;
++        if(test->savePerOpDataCSV != NULL) {
++                char fname[FILENAME_MAX];
++                sprintf(fname, "%s-%d-%05d.csv", test->savePerOpDataCSV, rep, rank);
++                ot = OpTimerInit(fname, test->transferSize);
++        }
++        // start timer after random offset was generated        
+         startForStonewall = GetTimeStamp();
+         hitStonewall = 0;
+ 
+@@ -1783,7 +1802,7 @@ static IOR_offset_t WriteOrRead(IOR_param_t *test, IOR_results_t *results,
+                   offset += (i * test->numTasks * test->blockSize) + (pretendRank * test->blockSize);
+                 }
+               }
+-              dataMoved += WriteOrReadSingle(offset, pretendRank, test->transferSize, & errors, test, fd, ioBuffers, access);
++              dataMoved += WriteOrReadSingle(offset, pretendRank, test->transferSize, & errors, test, fd, ioBuffers, access, ot, startForStonewall);
+               pairCnt++;
+ 
+               hitStonewall = ((test->deadlineForStonewalling != 0
+@@ -1846,7 +1865,7 @@ static IOR_offset_t WriteOrRead(IOR_param_t *test, IOR_results_t *results,
+                     offset += (i * test->numTasks * test->blockSize) + (pretendRank * test->blockSize);
+                   }
+                 }
+-                dataMoved += WriteOrReadSingle(offset, pretendRank, test->transferSize, & errors, test, fd, ioBuffers, access);
++                dataMoved += WriteOrReadSingle(offset, pretendRank, test->transferSize, & errors, test, fd, ioBuffers, access, ot, startForStonewall);
+                 pairCnt++;
+               }
+               j = 0;              
+@@ -1856,6 +1875,7 @@ static IOR_offset_t WriteOrRead(IOR_param_t *test, IOR_results_t *results,
+           point->pairs_accessed = pairCnt;
+         }
+ 
++        OpTimerFree(& ot);
+         totalErrorCount += CountErrors(test, access, errors);
+ 
+         if (access == WRITE && test->fsync == TRUE) {
+diff --git a/src/ior.h b/src/ior.h
+index c4c2bd0..055acfd 100755
+--- a/src/ior.h
++++ b/src/ior.h
+@@ -29,12 +29,6 @@
+    typedef void*    hdfsFS;      /* unused, but needs a type */
+ #endif
+ 
+-#ifdef USE_RADOS_AIORI
+-#  include <rados/librados.h>
+-#else
+-    typedef void *rados_t;
+-    typedef void *rados_ioctx_t;
+-#endif
+ #include "option.h"
+ #include "iordef.h"
+ #include "aiori.h"
+@@ -121,6 +115,7 @@ typedef struct
+     IOR_offset_t expectedAggFileSize; /* calculated aggregate file size */
+     IOR_offset_t randomPrefillBlocksize;   /* prefill option for random IO, the amount of data used for prefill */
+ 
++    char * savePerOpDataCSV;            /* save details about each I/O operation into this file */
+     char * saveRankDetailsCSV;       /* save the details about the performance to a file */
+     int summary_every_test;          /* flag to print summary every test, not just at end */
+     int uniqueDir;                   /* use unique directory for each fpp */
+@@ -155,10 +150,6 @@ typedef struct
+ 
+     char*       URI;                 /* "path" to target object */
+ 
+-    /* RADOS variables */
+-    rados_t rados_cluster;           /* RADOS cluster handle */
+-    rados_ioctx_t rados_ioctx;       /* I/O context for our pool in the RADOS cluster */
+-
+     int id;                          /* test's unique ID */
+     int intraTestBarriers;           /* barriers between open/op and op/close */
+     int warningAsErrors;             /* treat any warning as an error */
+diff --git a/src/iordef.h b/src/iordef.h
+index 8d614c4..ae5dec5 100755
+--- a/src/iordef.h
++++ b/src/iordef.h
+@@ -28,8 +28,9 @@ typedef enum {
+ 
+ typedef enum{
+     IOR_MEMORY_TYPE_CPU = 0,
+-    IOR_MEMORY_TYPE_GPU_MANAGED = 1,
+-    IOR_MEMORY_TYPE_GPU_DEVICE_ONLY = 2,
++    IOR_MEMORY_TYPE_GPU_MANAGED_CHECK_CPU = 1, /* Verifications are run on CPU */
++    IOR_MEMORY_TYPE_GPU_MANAGED_CHECK_GPU = 2, /* Verifications are run on GPU */
++    IOR_MEMORY_TYPE_GPU_DEVICE_ONLY = 3,
+ } ior_memory_flags;
+ 
+ #ifdef _WIN32
+diff --git a/src/md-workbench.c b/src/md-workbench.c
+index f58d95a..8cbe0b7 100644
+--- a/src/md-workbench.c
++++ b/src/md-workbench.c
+@@ -95,7 +95,9 @@ struct benchmark_options{
+   int read_only;
+   int stonewall_timer;
+   int stonewall_timer_wear_out;
+-  int gpu_memory_flags;              /* use the GPU to store the data */
++  ior_memory_flags gpuMemoryFlags;  /* use the GPU to store the data */
++  int gpuDirect;                /* use gpuDirect, this influences gpuMemoryFlags as well */
++  int gpuID;                       /* the GPU to use for gpuDirect or memory options */
+ 
+   char * latency_file_prefix;
+   int latency_keep_all;
+@@ -150,7 +152,9 @@ void init_options(){
+   .iterations = 3,
+   .file_size = 3901,
+   .packetTypeStr = "t",
+-  .run_info_file = "md-workbench.status"};
++  .run_info_file = "md-workbench.status",
++  .gpuID = -1,
++  };
+ }
+ 
+ static void mdw_wait(double runtime){
+@@ -556,8 +560,8 @@ void run_precreate(phase_stat_t * s, int current_index){
+     }
+   }
+ 
+-  char * buf = aligned_buffer_alloc(o.file_size, o.gpu_memory_flags);
+-  generate_memory_pattern(buf, o.file_size, o.random_seed, o.rank, o.dataPacketType, o.gpu_memory_flags);
++  char * buf = aligned_buffer_alloc(o.file_size, o.gpuMemoryFlags);
++  generate_memory_pattern(buf, o.file_size, o.random_seed, o.rank, o.dataPacketType, o.gpuMemoryFlags);
+   double op_timer; // timer for individual operations
+   size_t pos = -1; // position inside the individual measurement array
+   double op_time;
+@@ -573,7 +577,7 @@ void run_precreate(phase_stat_t * s, int current_index){
+       if (NULL == aiori_fh){
+         FAIL("Unable to open file %s", obj_name);
+       }
+-      update_write_memory_pattern(f * o.dset_count + d, buf, o.file_size, o.random_seed, o.rank, o.dataPacketType, o.gpu_memory_flags);
++      update_write_memory_pattern(f * o.dset_count + d, buf, o.file_size, o.random_seed, o.rank, o.dataPacketType, o.gpuMemoryFlags);
+       if ( o.file_size == (int) o.backend->xfer(WRITE, aiori_fh, (IOR_size_t *) buf, o.file_size, 0, o.backend_options)) {
+         s->obj_create.suc++;
+       }else{
+@@ -591,15 +595,15 @@ void run_precreate(phase_stat_t * s, int current_index){
+       }
+     }
+   }
+-  aligned_buffer_free(buf, o.gpu_memory_flags);
++  aligned_buffer_free(buf, o.gpuMemoryFlags);
+ }
+ 
+ /* FIFO: create a new file, write to it. Then read from the first created file, delete it... */
+ void run_benchmark(phase_stat_t * s, int * current_index_p){
+   char obj_name[MAX_PATHLEN];
+   int ret;
+-  char * buf = aligned_buffer_alloc(o.file_size, o.gpu_memory_flags);
+-  invalidate_buffer_pattern(buf, o.file_size, o.gpu_memory_flags);
++  char * buf = aligned_buffer_alloc(o.file_size, o.gpuMemoryFlags);
++  invalidate_buffer_pattern(buf, o.file_size, o.gpuMemoryFlags);
+   double op_timer; // timer for individual operations
+   size_t pos = -1; // position inside the individual measurement array
+   int start_index = *current_index_p;
+@@ -654,7 +658,7 @@ void run_benchmark(phase_stat_t * s, int * current_index_p){
+       }
+       if ( o.file_size == (int) o.backend->xfer(READ, aiori_fh, (IOR_size_t *) buf, o.file_size, 0, o.backend_options) ) {
+         if(o.verify_read){
+-            if(verify_memory_pattern(prevFile * o.dset_count + d, buf, o.file_size, o.random_seed, readRank, o.dataPacketType, o.gpu_memory_flags) == 0){
++            if(verify_memory_pattern(prevFile * o.dset_count + d, buf, o.file_size, o.random_seed, readRank, o.dataPacketType, o.gpuMemoryFlags) == 0){
+               s->obj_read.suc++;
+             }else{
+               s->obj_read.err++;
+@@ -695,8 +699,8 @@ void run_benchmark(phase_stat_t * s, int * current_index_p){
+       op_timer = GetTimeStamp();
+       aiori_fh = o.backend->create(obj_name, IOR_WRONLY | IOR_CREAT, o.backend_options);
+       if (NULL != aiori_fh){
+-        generate_memory_pattern(buf, o.file_size, o.random_seed, writeRank, o.dataPacketType, o.gpu_memory_flags);
+-        update_write_memory_pattern(newFileIndex * o.dset_count + d, buf, o.file_size, o.random_seed, writeRank, o.dataPacketType, o.gpu_memory_flags);
++        generate_memory_pattern(buf, o.file_size, o.random_seed, writeRank, o.dataPacketType, o.gpuMemoryFlags);
++        update_write_memory_pattern(newFileIndex * o.dset_count + d, buf, o.file_size, o.random_seed, writeRank, o.dataPacketType, o.gpuMemoryFlags);
+         
+         if ( o.file_size == (int) o.backend->xfer(WRITE, aiori_fh, (IOR_size_t *) buf, o.file_size, 0, o.backend_options)) {
+           s->obj_create.suc++;
+@@ -766,7 +770,7 @@ void run_benchmark(phase_stat_t * s, int * current_index_p){
+     *current_index_p += f;
+   }
+   s->repeats = pos + 1;
+-  aligned_buffer_free(buf, o.gpu_memory_flags);
++  aligned_buffer_free(buf, o.gpuMemoryFlags);
+ }
+ 
+ void run_cleanup(phase_stat_t * s, int start_index){
+@@ -828,7 +832,13 @@ static option_help options [] = {
+   {'W', "stonewall-wear-out", "Stop with stonewall after specified time and use a soft wear-out phase -- all processes perform the same number of iterations", OPTION_FLAG, 'd', & o.stonewall_timer_wear_out},
+   {'X', "verify-read", "Verify the data on read", OPTION_FLAG, 'd', & o.verify_read},
+   {0, "dataPacketType", "type of packet that will be created [offset|incompressible|timestamp|random|o|i|t|r]", OPTION_OPTIONAL_ARGUMENT, 's', & o.packetTypeStr},
+-  {0, "allocateBufferOnGPU", "Allocate the buffer on the GPU.", OPTION_FLAG, 'd', & o.gpu_memory_flags},
++#ifdef HAVE_CUDA
++  {0, "allocateBufferOnGPU", "Allocate I/O buffers on the GPU: X=1 uses managed memory - verifications are run on CPU; X=2 managed memory - verifications on GPU; X=3 device memory with verifications on GPU.", OPTION_OPTIONAL_ARGUMENT, 'd', & o.gpuMemoryFlags},
++  {0, "GPUid", "Select the GPU to use, use -1 for round-robin among local procs.", OPTION_OPTIONAL_ARGUMENT, 'd', & o.gpuID},
++#ifdef HAVE_GPU_DIRECT
++  {0, "gpuDirect", "Allocate I/O buffers on the GPU and use gpuDirect to store data; this option is incompatible with any option requiring CPU access to data.", OPTION_FLAG, 'd', & o.gpuDirect},
++#endif
++#endif
+   {0, "start-item", "The iteration number of the item to start with, allowing to offset the operations", OPTION_OPTIONAL_ARGUMENT, 'l', & o.start_item_number},
+   {0, "print-detailed-stats", "Print detailed machine parsable statistics.", OPTION_FLAG, 'd', & o.print_detailed_stats},
+   {0, "read-only", "Run read-only during benchmarking phase (no deletes/writes), probably use with -2", OPTION_FLAG, 'd', & o.read_only},
+@@ -939,8 +949,14 @@ mdworkbench_results_t* md_workbench_run(int argc, char ** argv, MPI_Comm world_c
+     o.backend->initialize(o.backend_options);
+   }
+ 
++  int tasksBlockMapping = QueryNodeMapping(o.com, true);
++  int numNodes = GetNumNodes(o.com);
++  int numTasksOnNode0 = GetNumTasksOnNode0(o.com);
++  if(o.gpuMemoryFlags != IOR_MEMORY_TYPE_CPU){
++    initCUDA(tasksBlockMapping, o.rank, numNodes, numTasksOnNode0, o.gpuID);
++  }
++    
+   int current_index = 0;
+-
+   if ( (o.phase_cleanup || o.phase_benchmark) && ! o.phase_precreate ){
+     current_index = return_position();
+   }
+diff --git a/src/mdtest.c b/src/mdtest.c
+index a5f752e..07aff66 100644
+--- a/src/mdtest.c
++++ b/src/mdtest.c
+@@ -118,7 +118,10 @@ typedef struct {
+   char unique_rm_uni_dir[MAX_PATHLEN];
+   char *write_buffer;
+   char *stoneWallingStatusFile;
+-  int gpu_memory_flags;
++  ior_memory_flags gpuMemoryFlags;  /* use the GPU to store the data */
++  int gpuDirect;                /* use gpuDirect, this influences gpuMemoryFlags as well */
++  int gpuID;                       /* the GPU to use for gpuDirect or memory options */
++
+ 
+ 
+   int barriers;
+@@ -175,6 +178,7 @@ typedef struct {
+   int global_dir_layout;
+   #endif /* HAVE_LUSTRE_LUSTREAPI */
+   char * saveRankDetailsCSV;       /* save the details about the performance to a file */
++  char * savePerOpDataCSV; 
+   const char *prologue;
+   const char *epilogue;
+ 
+@@ -194,6 +198,7 @@ static mdtest_options_t o;
+ 
+ /* This structure describes the processing status for stonewalling */
+ typedef struct{
++  OpTimer * ot; /* Operation timer*/
+   double start_time;
+ 
+   int stone_wall_timer_seconds;
+@@ -235,6 +240,7 @@ void VerboseMessage (int root_level, int any_level, int line, char * format, ...
+         fflush(out_logfile);
+     }
+ }
++char const * mdtest_test_name(int i);
+ 
+ void parse_dirpath(char *dirpath_arg) {
+     char * tmp, * token;
+@@ -409,7 +415,7 @@ static void create_file (const char *path, uint64_t itemNum) {
+         VERBOSE(3,5,"create_remove_items_helper: write..." );
+ 
+         o.hints.fsyncPerWrite = o.sync_file;
+-        update_write_memory_pattern(itemNum, o.write_buffer, o.write_bytes, o.random_buffer_offset, rank, o.dataPacketType, o.gpu_memory_flags);
++        update_write_memory_pattern(itemNum, o.write_buffer, o.write_bytes, o.random_buffer_offset, rank, o.dataPacketType, o.gpuMemoryFlags);
+ 
+         if ( o.write_bytes != (size_t) o.backend->xfer(WRITE, aiori_fh, (IOR_size_t *) o.write_buffer, o.write_bytes, 0, o.backend_options)) {
+             WARNF("unable to write file %s", curr_item);
+@@ -420,7 +426,7 @@ static void create_file (const char *path, uint64_t itemNum) {
+             if (o.write_bytes != (size_t) o.backend->xfer(READ, aiori_fh, (IOR_size_t *) o.write_buffer, o.write_bytes, 0, o.backend_options)) {
+                 WARNF("unable to verify write (read/back) file %s", curr_item);
+             }
+-            int error = verify_memory_pattern(itemNum, o.write_buffer, o.write_bytes, o.random_buffer_offset, rank, o.dataPacketType, o.gpu_memory_flags);
++            int error = verify_memory_pattern(itemNum, o.write_buffer, o.write_bytes, o.random_buffer_offset, rank, o.dataPacketType, o.gpuMemoryFlags);
+             o.verification_error += error;
+             if(error){
+                 VERBOSE(1,1,"verification error in file: %s", curr_item);
+@@ -440,11 +446,13 @@ void create_remove_items_helper(const int dirs, const int create, const char *pa
+ 
+     for (uint64_t i = progress->items_start; i < progress->items_per_dir ; ++i) {
+         if (!dirs) {
++            double start = GetTimeStamp();
+             if (create) {
+                 create_file (path, itemNum + i);
+             } else {
+                 remove_file (path, itemNum + i);
+             }
++            if(progress->ot) OpTimerValue(progress->ot, start - progress->start_time, GetTimeStamp() - start);
+         } else {
+             create_remove_dirs (path, create, itemNum + i);
+         }
+@@ -641,14 +649,16 @@ void mdtest_stat(const int random, const int dirs, const long dir_iter, const ch
+ 
+         /* below temp used to be hiername */
+         VERBOSE(3,5,"mdtest_stat %4s: %s", (dirs ? "dir" : "file"), item);
++        double start = GetTimeStamp();
+         if (-1 == o.backend->stat (item, &buf, o.backend_options)) {
+             WARNF("unable to stat %s %s", dirs ? "directory" : "file", item);
+         }
++        if(progress->ot) OpTimerValue(progress->ot, start - progress->start_time, GetTimeStamp() - start);        
+     }
+ }
+ 
+ /* reads all of the items created as specified by the input parameters */
+-void mdtest_read(int random, int dirs, const long dir_iter, char *path) {
++void mdtest_read(int random, int dirs, const long dir_iter, char *path, rank_progress_t * progress) {
+     uint64_t parent_dir, item_num = 0;
+     char item[MAX_PATHLEN], temp[MAX_PATHLEN];
+     aiori_fd_t *aiori_fh;
+@@ -658,8 +668,8 @@ void mdtest_read(int random, int dirs, const long dir_iter, char *path) {
+ 
+     /* allocate read buffer */
+     if (o.read_bytes > 0) {
+-        read_buffer = aligned_buffer_alloc(o.read_bytes, o.gpu_memory_flags);
+-        invalidate_buffer_pattern(read_buffer, o.read_bytes, o.gpu_memory_flags);
++        read_buffer = aligned_buffer_alloc(o.read_bytes, o.gpuMemoryFlags);
++        invalidate_buffer_pattern(read_buffer, o.read_bytes, o.gpuMemoryFlags);
+     }
+ 
+     uint64_t stop_items = o.items;
+@@ -729,6 +739,7 @@ void mdtest_read(int random, int dirs, const long dir_iter, char *path) {
+ 
+         o.hints.filePerProc = ! o.shared_file;
+ 
++        double start = GetTimeStamp();
+         /* open file for reading */
+         aiori_fh = o.backend->open (item, O_RDONLY, o.backend_options);
+         if (NULL == aiori_fh) {
+@@ -738,30 +749,31 @@ void mdtest_read(int random, int dirs, const long dir_iter, char *path) {
+ 
+         /* read file */
+         if (o.read_bytes > 0) {
+-            invalidate_buffer_pattern(read_buffer, o.read_bytes, o.gpu_memory_flags);
++            invalidate_buffer_pattern(read_buffer, o.read_bytes, o.gpuMemoryFlags);
+             if (o.read_bytes != (size_t) o.backend->xfer(READ, aiori_fh, (IOR_size_t *) read_buffer, o.read_bytes, 0, o.backend_options)) {
+                 WARNF("unable to read file %s", item);
+                 o.verification_error += 1;
+                 continue;
+-            }
++            }     
+             int pretend_rank = (2 * o.nstride + rank) % o.size;
+             if(o.verify_read){
+               if (o.shared_file) {
+                 pretend_rank = rank;
+               }
+-              int error = verify_memory_pattern(item_num, read_buffer, o.read_bytes, o.random_buffer_offset, pretend_rank, o.dataPacketType, o.gpu_memory_flags);
++              int error = verify_memory_pattern(item_num, read_buffer, o.read_bytes, o.random_buffer_offset, pretend_rank, o.dataPacketType, o.gpuMemoryFlags);
+               o.verification_error += error;
+               if(error){
+                 VERBOSE(1,1,"verification error in file: %s", item);
+               }
+             }
+         }
++        if(progress->ot) OpTimerValue(progress->ot, start - progress->start_time, GetTimeStamp() - start);
+ 
+         /* close file */
+         o.backend->close (aiori_fh, o.backend_options);
+     }
+     if(o.read_bytes){
+-      aligned_buffer_free(read_buffer, o.gpu_memory_flags);
++      aligned_buffer_free(read_buffer, o.gpuMemoryFlags);
+     }
+ }
+ 
+@@ -1197,7 +1209,7 @@ void file_test_create(const int iteration, const int ntasks, const char *path, r
+         }
+         MPI_Barrier(testComm);
+     }
+-
++      
+     /* create files */
+     create_remove_items(0, 0, 1, 0, temp_path, 0, progress);
+     if(o.stone_wall_timer_seconds){
+@@ -1241,6 +1253,11 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
+     /* create phase */
+     if (o.create_only ) {
+       phase_prepare();
++      if(o.savePerOpDataCSV != NULL) {
++        char path[MAX_PATHLEN];
++        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_FILE_CREATE_NUM), rank);
++        progress->ot = OpTimerInit(path, o.write_bytes > 0 ? o.write_bytes : 1);
++      }      
+       t_start = GetTimeStamp();
+ #ifdef HAVE_GPFSCREATESHARING_T
+       /* Enable createSharingHint */
+@@ -1267,6 +1284,7 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
+       }
+ #endif  /* HAVE_GPFSCREATESHARING_T */
+       t_end = GetTimeStamp();
++      OpTimerFree(& progress->ot);
+       updateResult(res, MDTEST_FILE_CREATE_NUM, o.items, t_start, t_end, t_end_before_barrier);
+     }else{
+       if (o.stoneWallingStatusFile){
+@@ -1295,7 +1313,13 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
+     /* stat phase */
+     if (o.stat_only ) {
+       phase_prepare();
++      if(o.savePerOpDataCSV != NULL) {
++        char path[MAX_PATHLEN];
++        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_FILE_STAT_NUM), rank);
++        progress->ot = OpTimerInit(path, 1);
++      }            
+       t_start = GetTimeStamp();
++      progress->start_time = t_start;
+       for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+         prep_testdir(iteration, dir_iter);
+         if (o.unique_dir_per_task) {
+@@ -1315,13 +1339,20 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
+       t_end_before_barrier = GetTimeStamp();
+       phase_end();
+       t_end = GetTimeStamp();
++      OpTimerFree(& progress->ot);
+       updateResult(res, MDTEST_FILE_STAT_NUM, o.items, t_start, t_end, t_end_before_barrier);
+     }
+ 
+     /* read phase */
+     if (o.read_only ) {
+       phase_prepare();
++      if(o.savePerOpDataCSV != NULL) {
++        char path[MAX_PATHLEN];
++        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_FILE_READ_NUM), rank);
++        progress->ot = OpTimerInit(path, o.read_bytes > 0 ? o.read_bytes : 1);
++      }            
+       t_start = GetTimeStamp();
++      progress->start_time = t_start;
+       for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+         prep_testdir(iteration, dir_iter);
+         if (o.unique_dir_per_task) {
+@@ -1337,23 +1368,28 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
+ 
+         /* read files */
+         if (o.random_seed > 0) {
+-                mdtest_read(1,0, dir_iter, temp_path);
++                mdtest_read(1, 0, dir_iter, temp_path, progress);
+         } else {
+-                mdtest_read(0,0, dir_iter, temp_path);
++                mdtest_read(0, 0, dir_iter, temp_path, progress);
+         }
+       }
+       t_end_before_barrier = GetTimeStamp();
+       phase_end();
+       t_end = GetTimeStamp();
++      OpTimerFree(& progress->ot);
+       updateResult(res, MDTEST_FILE_READ_NUM, o.items, t_start, t_end, t_end_before_barrier);
+     }
+ 
+     /* remove phase */
+     if (o.remove_only) {
+       phase_prepare();
++      if(o.savePerOpDataCSV != NULL) {
++        sprintf(temp_path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_FILE_REMOVE_NUM), rank);
++        progress->ot = OpTimerInit(temp_path, o.write_bytes > 0 ? o.write_bytes : 1);
++      }      
+       t_start = GetTimeStamp();
++      progress->start_time = t_start;
+       progress->items_start = 0;
+-
+       for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+         prep_testdir(iteration, dir_iter);
+         if (o.unique_dir_per_task) {
+@@ -1366,19 +1402,19 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
+         }
+ 
+         VERBOSE(3,5,"file_test: rm directories path is '%s'", temp_path );
+-
+         if (o.collective_creates) {
+             if (rank == 0) {
+                 collective_create_remove(0, 0, ntasks, temp_path, progress);
+             }
+         } else {
+-            VERBOSE(3,5,"gonna create %s", temp_path);
++            VERBOSE(3,5,"gonna remove %s", temp_path);
+             create_remove_items(0, 0, 0, 0, temp_path, 0, progress);
+         }
+       }
+       t_end_before_barrier = GetTimeStamp();
+       phase_end();
+       t_end = GetTimeStamp();
++      OpTimerFree(& progress->ot);
+       updateResult(res, MDTEST_FILE_REMOVE_NUM, o.items, t_start, t_end, t_end_before_barrier);
+     }
+ 
+@@ -1530,7 +1566,7 @@ static void summarize_results_rank0(int iterations,  mdtest_results_t * all_resu
+     }
+   }
+ 
+-  VERBOSE(0, -1, "\nSUMMARY %s: (of %d iterations)", print_time ? "time" : "rate", iterations);
++  VERBOSE(0, -1, "\nSUMMARY %s (in ops/sec): (of %d iterations)", print_time ? "time" : "rate", iterations);
+   PRINT("   Operation     ");
+   if(o.show_perrank_statistics){
+     PRINT("per Rank: Max            Min           Mean      per Iteration:");
+@@ -2222,6 +2258,7 @@ void mdtest_init_args(){
+      .random_buffer_offset = -1,
+      .prologue = "",
+      .epilogue = "",
++     .gpuID = -1,
+   };
+ }
+ 
+@@ -2309,11 +2346,17 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
+       {0, "dataPacketType", "type of packet that will be created [offset|incompressible|timestamp|random|o|i|t|r]", OPTION_OPTIONAL_ARGUMENT, 's', & packetType},
+       {0, "run-cmd-before-phase", "call this external command before each phase (excluded from the timing)", OPTION_OPTIONAL_ARGUMENT, 's', & o.prologue},
+       {0, "run-cmd-after-phase",  "call this external command after each phase (included in the timing)", OPTION_OPTIONAL_ARGUMENT, 's', & o.epilogue},
+-      {0, "allocateBufferOnGPU", "Allocate the buffer on the GPU.", OPTION_FLAG, 'd', & o.gpu_memory_flags},
++#ifdef HAVE_CUDA
++      {0, "allocateBufferOnGPU", "Allocate I/O buffers on the GPU: X=1 uses managed memory - verifications are run on CPU; X=2 managed memory - verifications on GPU; X=3 device memory with verifications on GPU.", OPTION_OPTIONAL_ARGUMENT, 'd', & o.gpuMemoryFlags},
++      {0, "GPUid", "Select the GPU to use, use -1 for round-robin among local procs.", OPTION_OPTIONAL_ARGUMENT, 'd', & o.gpuID},
++#ifdef HAVE_GPU_DIRECT
++      {0, "gpuDirect", "Allocate I/O buffers on the GPU and use gpuDirect to store data; this option is incompatible with any option requiring CPU access to data.", OPTION_FLAG, 'd', & o.gpuDirect},
++#endif
++#endif
+       {0, "warningAsErrors",        "Any warning should lead to an error.", OPTION_FLAG, 'd', & aiori_warning_as_errors},
+       {0, "saveRankPerformanceDetails", "Save the individual rank information into this CSV file.", OPTION_OPTIONAL_ARGUMENT, 's', & o.saveRankDetailsCSV},
++      {0, "savePerOpDataCSV", "Store the performance of each rank into an individual file prefixed with this option.", OPTION_OPTIONAL_ARGUMENT, 's', & o.savePerOpDataCSV},
+       {0, "showRankStatistics", "Include statistics per rank", OPTION_FLAG, 'd', & o.show_perrank_statistics},
+-
+       LAST_OPTION
+     };
+     options_all_t * global_options = airoi_create_all_module_options(options);
+@@ -2354,7 +2397,6 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
+     for (i = 1; i < argc; i++) {
+         snprintf(&cmd_buffer[strlen(cmd_buffer)], 4096-strlen(cmd_buffer), " '%s'", argv[i]);
+     }
+-
+     VERBOSE(0,-1,"-- started at %s --\n", PrintTimestamp());
+     VERBOSE(0,-1,"mdtest-%s was launched with %d total task(s) on %d node(s)", RELEASE_VERS, o.size, numNodes);
+     VERBOSE(0,-1,"Command line used: %s", cmd_buffer);
+@@ -2383,7 +2425,6 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
+       o.directory_loops = 1;
+     }
+     md_validate_tests();
+-
+     // option_print_current(options);
+     VERBOSE(1,-1, "api                     : %s", o.api);
+     VERBOSE(1,-1, "barriers                : %s", ( o.barriers ? "True" : "False" ));
+@@ -2421,6 +2462,11 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
+     VERBOSE(1,-1, "call_sync               : %s", ( o.call_sync ? "True" : "False" ));
+     VERBOSE(1,-1, "depth                   : %d", o.depth );
+     VERBOSE(1,-1, "make_node               : %d", o.make_node );
++    int tasksBlockMapping = QueryNodeMapping(testComm, true);
++
++    if(o.gpuMemoryFlags != IOR_MEMORY_TYPE_CPU){
++       initCUDA(tasksBlockMapping, rank, numNodes, numTasksOnNode0, o.gpuID);
++    }
+ 
+     /* setup total number of items and number of items per dir */
+     if (o.depth <= 0) {
+@@ -2498,8 +2544,8 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
+ 
+     /* allocate and initialize write buffer with # */
+     if (o.write_bytes > 0) {
+-        o.write_buffer = aligned_buffer_alloc(o.write_bytes, o.gpu_memory_flags);
+-        generate_memory_pattern(o.write_buffer, o.write_bytes, o.random_buffer_offset, rank, o.dataPacketType, o.gpu_memory_flags);
++        o.write_buffer = aligned_buffer_alloc(o.write_bytes, o.gpuMemoryFlags);
++        generate_memory_pattern(o.write_buffer, o.write_bytes, o.random_buffer_offset, rank, o.dataPacketType, o.gpuMemoryFlags);
+     }
+ 
+     /* setup directory path to work in */
+@@ -2525,8 +2571,6 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
+     VERBOSE(3,-1,"main (before display_freespace): o.testdirpath is '%s'", o.testdirpath );
+ 
+     if (rank == 0) ShowFileSystemSize(o.testdirpath, o.backend, o.backend_options);
+-    int tasksBlockMapping = QueryNodeMapping(testComm, true);
+-
+     /* set the shift to mimic IOR and shift by procs per node */
+     if (o.nstride > 0) {
+         if ( numNodes > 1 && tasksBlockMapping ) {
+@@ -2658,7 +2702,7 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE *
+     }
+ 
+     if (o.write_bytes > 0) {
+-      aligned_buffer_free(o.write_buffer, o.gpu_memory_flags);
++      aligned_buffer_free(o.write_buffer, o.gpuMemoryFlags);
+     }
+     free(o.summary_table);
+ 
+diff --git a/src/mdtest.h b/src/mdtest.h
+index 9ef4142..e7392da 100644
+--- a/src/mdtest.h
++++ b/src/mdtest.h
+@@ -4,6 +4,7 @@
+ #include <mpi.h>
+ #include <stdio.h>
+ #include <stdint.h>
++#include <utilities.h>
+ 
+ typedef enum {
+   MDTEST_DIR_CREATE_NUM = 0,
+diff --git a/src/parse_options.c b/src/parse_options.c
+index 778898a..6a44e4e 100755
+--- a/src/parse_options.c
++++ b/src/parse_options.c
+@@ -64,10 +64,6 @@ static void CheckRunSettings(IOR_test_t *tests)
+                 if(params->dualMount && !params->filePerProc) {
+                   ERR("Dual Mount can only be used with File Per Process");
+                 }
+-
+-                if(params->gpuDirect){
+-                  params->gpuMemoryFlags = IOR_MEMORY_TYPE_GPU_DEVICE_ONLY;
+-                }
+         }
+ }
+ 
+@@ -122,6 +118,8 @@ void DecodeDirective(char *line, IOR_param_t *params, options_all_t * module_opt
+             fclose(fd);
+           }
+           params->saveRankDetailsCSV = strdup(value);
++        } else if (strcasecmp(option, "savePerOpDataCSV") == 0){
++          params->savePerOpDataCSV = strdup(value);
+         } else if (strcasecmp(option, "summaryFormat") == 0) {
+                 if(strcasecmp(value, "default") == 0){
+                   outputFormat = OUTPUT_DEFAULT;
+@@ -429,8 +427,8 @@ option_help * createGlobalOptions(IOR_param_t * params){
+     {.help="  -O stoneWallingStatusFile=FILE     -- this file keeps the number of iterations from stonewalling during write and allows to use them for read", .arg = OPTION_OPTIONAL_ARGUMENT},
+     {.help="  -O minTimeDuration=0           -- minimum Runtime for the run (will repeat from beginning of the file if time is not yet over)", .arg = OPTION_OPTIONAL_ARGUMENT},
+ #ifdef HAVE_CUDA
+-    {.help="  -O allocateBufferOnGPU=X           -- allocate I/O buffers on the GPU: X=1 uses managed memory, X=2 device memory.", .arg = OPTION_OPTIONAL_ARGUMENT},
+-    {.help="  -O GPUid=X                         -- select the GPU to use.", .arg = OPTION_OPTIONAL_ARGUMENT},
++    {.help="  -O allocateBufferOnGPU=X           -- allocate I/O buffers on the GPU: X=1 uses managed memory - verifications are run on CPU; X=2 managed memory - verifications on GPU; X=3 device memory with verifications on GPU.", .arg = OPTION_OPTIONAL_ARGUMENT},
++    {.help="  -O GPUid=X                         -- select the GPU to use, use -1 for round-robin among local procs.", .arg = OPTION_OPTIONAL_ARGUMENT},
+ #ifdef HAVE_GPU_DIRECT
+     {0, "gpuDirect",        "allocate I/O buffers on the GPU and use gpuDirect to store data; this option is incompatible with any option requiring CPU access to data.", OPTION_FLAG, 'd', & params->gpuDirect},
+ #endif
+@@ -477,6 +475,7 @@ option_help * createGlobalOptions(IOR_param_t * params){
+     {.help="  -O summaryFile=FILE                 -- store result data into this file", .arg = OPTION_OPTIONAL_ARGUMENT},
+     {.help="  -O summaryFormat=[default,JSON,CSV] -- use the format for outputting the summary", .arg = OPTION_OPTIONAL_ARGUMENT},
+     {.help="  -O saveRankPerformanceDetailsCSV=<FILE> -- store the performance of each rank into the named CSV file.", .arg = OPTION_OPTIONAL_ARGUMENT},
++    {.help="  -O savePerOpDataCSV=<FILE> -- store the performance of each rank into an individual file prefixed with this option.", .arg = OPTION_OPTIONAL_ARGUMENT},
+     {0, "dryRun",      "do not perform any I/Os just run evtl. inputs print dummy output", OPTION_FLAG, 'd', & params->dryRun},
+     LAST_OPTION,
+   };
+diff --git a/src/utilities-gpu.cu b/src/utilities-gpu.cu
+index b3ee8fe..75a71c3 100644
+--- a/src/utilities-gpu.cu
++++ b/src/utilities-gpu.cu
+@@ -21,16 +21,40 @@ void cu_generate_memory_timestamp(uint64_t * buf, size_t length, int rand_seed,
+   }
+ }
+ 
++__global__ 
++void cu_generate_memory_incompressible(uint64_t * buf, size_t length, uint64_t seed){
++  size_t pos = blockIdx.x * blockDim.x + threadIdx.x;
++  if(pos < length){
++    buf[pos] = seed | pos;
++  }
++}
++
+ __global__ 
+ void cu_verify_memory_timestamp(uint64_t item, uint64_t * buf, size_t length, int rand_seed, uint64_t pretendRank, int * errors){
+-  
++  size_t pos = blockIdx.x * blockDim.x + threadIdx.x;
++  if(pos < length){
++    int correct = buf[pos] == (pretendRank | rand_seed + pos);
++    if(! correct){
++      *errors = 1; // it isn't thread safe but one error reported is enough
++    }
++  }
+ }
+ 
+ extern "C" void generate_memory_pattern_gpu(char * buf, size_t bytes, int rand_seed, int pretendRank, ior_dataPacketType_e dataPacketType){    
+   size_t blocks = (bytes+2047)/2048;
+   size_t threads = 256;
+-  if(dataPacketType == DATA_TIMESTAMP){    
+-    cu_generate_memory_timestamp<<<blocks, threads>>>((uint64_t*) buf, bytes/sizeof(uint64_t), rand_seed, ((uint64_t) pretendRank) << 32);
++  switch(dataPacketType){
++    case(DATA_RANDOM):
++      // Nothing to do, will work on updates
++      break;
++    case(DATA_INCOMPRESSIBLE):{      
++      cu_generate_memory_incompressible<<<blocks, threads>>>((uint64_t*) buf, bytes/sizeof(uint64_t), rand_seed + pretendRank);
++      break;
++    }case(DATA_OFFSET):{
++    }case(DATA_TIMESTAMP):{
++      cu_generate_memory_timestamp<<<blocks, threads>>>((uint64_t*) buf, bytes/sizeof(uint64_t), rand_seed, ((uint64_t) pretendRank) << 32);
++      break;
++    }
+   }
+ }
+ 
+@@ -44,8 +68,15 @@ extern "C" int verify_memory_pattern_gpu(uint64_t item, char * buffer, size_t by
+   int errors = 0;
+   size_t blocks = (bytes+2047)/2048;
+   size_t threads = 256;  
++  int * derror_found;
++  cudaMalloc(&derror_found, sizeof(int));
++  cudaMemcpy(derror_found, & errors, sizeof(int), cudaMemcpyHostToDevice);
+   if(dataPacketType == DATA_TIMESTAMP){
+-    cu_verify_memory_timestamp<<<blocks, threads>>>(item, (uint64_t*) buffer, bytes/sizeof(uint64_t), rand_seed, pretendRank, & errors);
++    cu_verify_memory_timestamp<<<blocks, threads>>>(item, (uint64_t*) buffer, bytes/sizeof(uint64_t), rand_seed, ((uint64_t) pretendRank) << 32, derror_found);
++  }else if(dataPacketType == DATA_INCOMPRESSIBLE){
++    
+   }
++  cudaMemcpy(& errors, derror_found, sizeof(int), cudaMemcpyDeviceToHost);
++  cudaFree(derror_found);
+   return errors;
+ }
+diff --git a/src/utilities.c b/src/utilities.c
+index e108760..d9468df 100755
+--- a/src/utilities.c
++++ b/src/utilities.c
+@@ -96,7 +96,7 @@ void update_write_memory_pattern(uint64_t item, char * buf, size_t bytes, int ra
+     return;
+ 
+ #ifdef HAVE_GPU_DIRECT
+-  if(type == IOR_MEMORY_TYPE_GPU_DEVICE_ONLY){
++  if(type == IOR_MEMORY_TYPE_GPU_DEVICE_ONLY || type == IOR_MEMORY_TYPE_GPU_MANAGED_CHECK_GPU){
+     update_write_memory_pattern_gpu(item, buf, bytes, rand_seed,  pretendRank, dataPacketType);
+     return;
+   }
+@@ -136,7 +136,7 @@ void update_write_memory_pattern(uint64_t item, char * buf, size_t bytes, int ra
+  */
+ void generate_memory_pattern(char * buf, size_t bytes, int rand_seed, int pretendRank, ior_dataPacketType_e dataPacketType, ior_memory_flags type){
+ #ifdef HAVE_GPU_DIRECT
+-  if(type == IOR_MEMORY_TYPE_GPU_DEVICE_ONLY){
++  if(type == IOR_MEMORY_TYPE_GPU_DEVICE_ONLY || type == IOR_MEMORY_TYPE_GPU_MANAGED_CHECK_GPU){
+     generate_memory_pattern_gpu(buf, bytes, rand_seed,  pretendRank, dataPacketType);
+     return;
+   }
+@@ -170,7 +170,7 @@ void generate_memory_pattern(char * buf, size_t bytes, int rand_seed, int preten
+ }
+ 
+ void invalidate_buffer_pattern(char * buffer, size_t bytes, ior_memory_flags type){
+-  if(type == IOR_MEMORY_TYPE_GPU_DEVICE_ONLY){
++  if(type == IOR_MEMORY_TYPE_GPU_DEVICE_ONLY || type == IOR_MEMORY_TYPE_GPU_MANAGED_CHECK_GPU){
+ #ifdef HAVE_GPU_DIRECT
+     cudaMemset(buffer, 0x42, bytes > 512 ? 512 : bytes);
+ #endif
+@@ -182,7 +182,7 @@ void invalidate_buffer_pattern(char * buffer, size_t bytes, ior_memory_flags typ
+ int verify_memory_pattern(uint64_t item, char * buffer, size_t bytes, int rand_seed, int pretendRank, ior_dataPacketType_e dataPacketType, ior_memory_flags type){  
+   int error = 0;
+ #ifdef HAVE_GPU_DIRECT
+-  if(type == IOR_MEMORY_TYPE_GPU_DEVICE_ONLY){
++  if(type == IOR_MEMORY_TYPE_GPU_DEVICE_ONLY || type == IOR_MEMORY_TYPE_GPU_MANAGED_CHECK_GPU){
+     error = verify_memory_pattern_gpu(item, buffer, bytes, rand_seed, pretendRank, dataPacketType);
+     return error;
+   }
+@@ -235,6 +235,76 @@ int verify_memory_pattern(uint64_t item, char * buffer, size_t bytes, int rand_s
+   return error;
+ }
+ 
++/* Data structure to store information about per-operation timer */
++struct OpTimer{
++    FILE * fd;
++    int size; /* per op */
++    double * time;
++    double * value;
++    int pos;
++};
++
++/* by default store 1M operations into the buffer before flushing */
++#define OP_BUFFER_SIZE 1000000
++
++OpTimer* OpTimerInit(char * filename, int size){
++  if(filename == NULL) {
++    return NULL;
++  }
++  OpTimer * ot = safeMalloc(sizeof(OpTimer));
++  ot->size = size;
++  ot->value = safeMalloc(sizeof(double)*OP_BUFFER_SIZE);
++  ot->time = safeMalloc(sizeof(double)*OP_BUFFER_SIZE);
++  ot->pos = 0;
++  ot->fd = fopen(filename, "w");
++  if(ot->fd < 0){
++    ERR("Could not create OpTimer");
++  }
++  char buff[] = "time,runtime,tp\n";
++  int ret = fwrite(buff, strlen(buff), 1, ot->fd);
++  if(ret != 1){
++    FAIL("Cannot write header to OpTimer file");
++  }
++  return ot;
++}
++
++void OpTimerFlush(OpTimer* ot){
++  if(ot == NULL) {
++    return;
++  }  
++  for(int i=0; i < ot->pos; i++){
++    fprintf(ot->fd, "%.8e,%.8e,%e\n", ot->time[i], ot->value[i], ot->size/ot->value[i]);
++  }
++  ot->pos = 0;
++}
++
++void OpTimerValue(OpTimer* ot, double now, double runTime){
++  if(ot == NULL) {
++    return;
++  }  
++  ot->time[ot->pos] = now;
++  ot->value[ot->pos++] = runTime;
++  if(ot->pos == OP_BUFFER_SIZE){
++    OpTimerFlush(ot);
++  }
++}
++
++void OpTimerFree(OpTimer** otp){
++  if(otp == NULL || *otp == NULL) {
++    return;
++  }
++  OpTimer * ot = *otp;
++  OpTimerFlush(ot);
++  ot->pos = 0;
++  free(ot->value);
++  free(ot->time);
++  ot->value = NULL;
++  ot->time = NULL;
++  fclose(ot->fd);
++  free(ot);
++  *otp = NULL;
++}
++
+ void* safeMalloc(uint64_t size){
+   void * d = malloc(size);
+   if (d == NULL){
+@@ -435,6 +505,36 @@ int QueryNodeMapping(MPI_Comm comm, int print_nodemap) {
+     return ret;
+ }
+ 
++void initCUDA(int blockMapping, int rank, int numNodes, int tasksPerNode, int useGPUID){  
++#ifdef HAVE_CUDA
++  int device_count;
++  cudaError_t cret = cudaGetDeviceCount(& device_count);
++  if(cret != cudaSuccess){
++    ERRF("cudaGetDeviceCount() error: %d %s", (int) cret, cudaGetErrorString(cret));
++  }  
++  //if (rank == 0){
++  //      char val[20];
++  //      sprintf(val, "%d", device_count);
++  //      PrintKeyVal("cudaDevices", val);
++  //}
++  // if set to -1 use round robin per task
++  if(useGPUID == -1){
++     int device = 0;
++     if(blockMapping){
++        device = (rank % tasksPerNode) % device_count;
++     }else{
++        device = (rank / numNodes) % device_count;
++     }
++     cret = cudaSetDevice(device);
++  }else{
++     cret = cudaSetDevice(useGPUID);
++  }  
++  if(cret != cudaSuccess){
++    WARNF("cudaSetDevice(%d) error: %s", useGPUID, cudaGetErrorString(cret));
++  }
++#endif
++}
++
+ /*
+  * There is a more direct way to determine the node count in modern MPI
+  * versions so we use that if possible.
+@@ -1043,7 +1143,7 @@ void *aligned_buffer_alloc(size_t size, ior_memory_flags type)
+   char *buf, *tmp;
+   char *aligned;
+ 
+-  if(type == IOR_MEMORY_TYPE_GPU_MANAGED){
++  if(type == IOR_MEMORY_TYPE_GPU_MANAGED_CHECK_CPU || type == IOR_MEMORY_TYPE_GPU_MANAGED_CHECK_GPU){
+ #ifdef HAVE_CUDA
+     // use unified memory here to allow drop-in-replacement
+     if (cudaMallocManaged((void**) & buf, size, cudaMemAttachGlobal) != cudaSuccess){
+diff --git a/src/utilities.h b/src/utilities.h
+index 1690a16..fde1c3f 100755
+--- a/src/utilities.h
++++ b/src/utilities.h
+@@ -47,6 +47,8 @@ void invalidate_buffer_pattern(char * buf, size_t bytes, ior_memory_flags type);
+ int verify_memory_pattern(uint64_t item, char * buffer, size_t bytes, int rand_seed, int pretendRank, ior_dataPacketType_e dataPacketType, ior_memory_flags type);
+ int verify_memory_pattern_gpu(uint64_t item, char * buffer, size_t bytes, int rand_seed, int pretendRank, ior_dataPacketType_e dataPacketType);
+ 
++void PrintKeyVal(char * key, char * value);
++void initCUDA(int blockMapping, int rank, int numNodes, int tasksPerNode, int useGPUID);
+ char *CurrentTimeString(void);
+ int Regex(char *, char *);
+ void ShowFileSystemSize(char * filename, const struct ior_aiori * backend, void * backend_options);
+@@ -62,6 +64,12 @@ void DelaySecs(int delay);
+ void updateParsedOptions(IOR_param_t * options, options_all_t * global_options);
+ size_t NodeMemoryStringToBytes(char *size_str);
+ 
++typedef struct OpTimer OpTimer;
++OpTimer* OpTimerInit(char * filename, int size);
++void OpTimerValue(OpTimer* otimer_in, double now, double runTime);
++void OpTimerFlush(OpTimer* otimer_in);
++void OpTimerFree(OpTimer** otimer_in);
++
+ /* Returns -1, if cannot be read  */
+ int64_t ReadStoneWallingIterations(char * const filename, MPI_Comm com);
+ void StoreStoneWallingIterations(char * const filename, int64_t count);
