@@ -71,11 +71,11 @@ fi
 %else
 %configure --with-mpiio --with-daos=/usr --with-hdf5 --bindir=$MPI_BIN --mandir=$MPI_MAN --libdir=$MPI_LIB --includedir=$MPI_INCLUDE --datadir=%{_datadir}/doc/ior-mpich
 %endif
-%make_build
+%make_build V=1
 
 %install
 %module_load mpich
-%make_install
+%make_install V=1
 
 %if 0%{?suse_version}
 MPI_LIB=%{_libdir}
