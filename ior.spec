@@ -94,7 +94,7 @@ $MPI_MAN/man1/*
 EOF
 %endif
 
-%find_lang mdtest
+%find_lang mdtest --with-man
 
 %if (0%{?suse_version} >= 1)
 %files
