@@ -94,15 +94,15 @@ $MPI_MAN/man1/*
 EOF
 %endif
 
-%find_lang mdtest --with-man
-
 %if (0%{?suse_version} >= 1)
 %files
 %{_bindir}/*
 %{_defaultdocdir}/%{name}/
 %{_mandir}/man1/*
 %else
+%find_lang mdtest --with-man
 %files -f files.mpich
+%files -f mdtest.lang
 %endif
 
 %changelog
