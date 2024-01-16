@@ -12,7 +12,7 @@ Release:	1%{?commit:.g%{shortcommit}}%{?dist}
 
 Summary:	IOR-HPC
 
-License:	GPL
+License:    GPL-2.0-only
 URL:		https://github.com/hpc/%{name}/
 Source0:    https://github.com/hpc/%{name}/releases/download/%{version}/%{name}-%{version}.tar.gz
 %if "%{?commit}" != ""
