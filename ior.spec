@@ -58,8 +58,8 @@ export CC=mpicc
 export CXX=mpicxx
 export FC=mpif90
 export F77=mpif77
-export CFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing -fPIC"
-export CXXFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing -fPIC"
+export CFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing -fPIC -fPIE"
+export CXXFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing -fPIC -fPIE"
 if [ ! -f configure ]; then
     # probably a git tarball
     ./bootstrap
