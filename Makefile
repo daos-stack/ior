@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+# Copyright (c) 2021-2024 Intel Corporation
+
 NAME                := ior
 SRC_EXT             := gz
 PKG_GIT_COMMIT      := d3574d536643475269d37211e283b49ebd6732d7
