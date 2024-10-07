@@ -7,18 +7,19 @@
 %global shortcommit %(c=%{commit};echo ${c:0:7})
 
 Name:		ior
-Version:	3.3.0
-Release:	20%{?commit:.g%{shortcommit}}%{?dist}
+Version:	4.0.0
+Release:	1%{?commit:.g%{shortcommit}}%{?dist}
 
 Summary:	IOR-HPC
 
-License:	GPL
+License:    GPL-2.0-only
 URL:		https://github.com/hpc/%{name}/
 Source0:    https://github.com/hpc/%{name}/releases/download/%{version}/%{name}-%{version}.tar.gz
 %if "%{?commit}" != ""
 Patch1: %{version}..%{commit}.patch
 %endif
-Patch3: daos-configure.patch
+# patch configure.ac
+Patch3: https://github.com/hpc/ior/commit/38064419cbe959cb538695e51b2bc2a91d6971f7.patch
 
 BuildRequires: mpich-devel
 BuildRequires: hwloc-devel
@@ -27,7 +28,6 @@ BuildRequires: unzip
 BuildRequires: autoconf, automake
 BuildRequires: daos-devel
 BuildRequires: hdf5-mpich-devel%{?_isa}
-BuildRequires: mercury-devel
 BuildRequires: chrpath
 %if (0%{?suse_version} >= 1500)
 BuildRequires: lua-lmod
@@ -50,18 +50,16 @@ IOR-HPC
 
 %prep
 %autosetup -p1
-%if "%{?commit}" != ""
-# we most likely patched configure.ac
+# we patched configure.ac
 autoreconf
-%endif
 
 %build
 export CC=mpicc
 export CXX=mpicxx
 export FC=mpif90
 export F77=mpif77
-export CFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing -fPIC"
-export CXXFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing -fPIC"
+export CFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing -fPIC -fPIE"
+export CXXFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing -fPIC -fPIE"
 if [ ! -f configure ]; then
     # probably a git tarball
     ./bootstrap
@@ -73,11 +71,11 @@ fi
 %else
 %configure --with-mpiio --with-daos=/usr --with-hdf5 --bindir=$MPI_BIN --mandir=$MPI_MAN --libdir=$MPI_LIB --includedir=$MPI_INCLUDE --datadir=%{_datadir}/doc/ior-mpich
 %endif
-%make_build
+%make_build V=1
 
 %install
 %module_load mpich
-%make_install
+%make_install V=1
 
 %if 0%{?suse_version}
 MPI_LIB=%{_libdir}
@@ -96,17 +94,23 @@ $MPI_MAN/man1/*
 EOF
 %endif
 
-
 %if (0%{?suse_version} >= 1)
 %files
 %{_bindir}/*
 %{_defaultdocdir}/%{name}/
 %{_mandir}/man1/*
 %else
+%find_lang mdtest --with-man
 %files -f files.mpich
+%files -f mdtest.lang
 %endif
 
 %changelog
+* Fri Jan 12 2024 Dalton A. Bohning <dalton.bohning@intel.com> - 4.0.0-1
+- Update to 4.0.0 release
+- Remove BR: mercury-devel
+- Use upstream configure.ac patch instead of local
+
 * Tue Jul 04 2023 Brian J. Murrell <brian.murrell@intel.com> - 3.3.0-20
 - Add BR: mercury-devel
 - Remove static library
