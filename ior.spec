@@ -106,7 +106,7 @@ EOF
 %endif
 
 %changelog
-* Fri Jan 12 2024 Dalton A. Bohning <dalton.bohning@intel.com> - 4.0.0-1
+* Fri Jan 31 2025 Dalton A. Bohning <dalton.bohning@hpe.com> - 4.0.0-1
 - Update to 4.0.0 release
 - Remove BR: mercury-devel
 - Use upstream configure.ac patch instead of local
