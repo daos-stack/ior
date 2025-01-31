@@ -58,8 +58,10 @@ export CC=mpicc
 export CXX=mpicxx
 export FC=mpif90
 export F77=mpif77
+%if (0%{?suse_version} >= 1500)
 export CFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing -fPIC -fPIE"
 export CXXFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing -fPIC -fPIE"
+%endif
 if [ ! -f configure ]; then
     # probably a git tarball
     ./bootstrap
